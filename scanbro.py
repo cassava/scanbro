@@ -24,55 +24,22 @@
 
 import argparse
 import subprocess
+import os
+import pathlib
+import shutil
 
-class Processor:
-    def register(parser):
-        pass
-
-
-class Backend(Processor):
-    def __init__(self):
-        pass
-
-    def process_into(self, output):
-        pass
-
-
-class CommandOption:
-    """Represents an option with several available choices."""
-
-    def __init__(self, argument, default, choices):
-        self.argument = argument
-        self.default = default
-        self.choices = choices
-
-    def arguments(self, value):
-        if value is not None:
-            if value in self.choices:
-                return [self.argument, self.choices[value]]
-            else:
-                raise Exception("argument {} requires one of {}".format(self.argument, self.choices))
-        else:
-            return []
-
-
-class FileBackend(Backend):
-    def register(parser):
-        parser.add_argument(
-            '-i, --input-file',
-            dest='file_input',
-            takes_value=True,
-            help='input file for file backend',
-        )
-
-    def __init__(self, args):
-        self.file = args.file_input
-        if self.file is None:
-            raise Exception("backend file requires --input-file")
-
-    def process_into(self, output):
-        return self.file
-
+class Color:
+   PURPLE = '\033[95m'
+   CYAN = '\033[96m'
+   DARKCYAN = '\033[36m'
+   BLUE = '\033[94m'
+   GREEN = '\033[92m'
+   YELLOW = '\033[93m'
+   RED = '\033[91m'
+   GRAY = '\033[90m'
+   BOLD = '\033[1m'
+   UNDERLINE = '\033[4m'
+   END = '\033[0m'
 
 class Geometry:
     """Represents a geometry in millimeters that can be scanned."""
@@ -86,7 +53,7 @@ class Geometry:
     def __repr__(self):
         return "Geometry({}, {}, {}, {})".format(self.w, self.h, self.x, self.y)
 
-    def __print__(self):
+    def __str__(self):
         return "{}x{}+{}+{}".format(self.w, self.h, self.x, self.y)
 
     def can_cover(self, g):
@@ -95,7 +62,7 @@ class Geometry:
                self.h + self.y >= g.h + g.y and
                self.w + self.x >= g.w + g.x)
 
-    def arguments(self):
+    def args(self):
         cargs = [
             '-x', str(self.w),
             '-y', str(self.h),
@@ -115,7 +82,7 @@ class Papersize(Geometry):
     def __repr__(self):
         return "Papersize({}, {})".format(self.w, self.h)
 
-    def __print__(self):
+    def __str__(self):
         return "{}x{}".format(self.w, self.h)
 
 
@@ -166,124 +133,236 @@ PAPERSIZES = {
 }
 
 
-class Scanner(Backend):
-    """Represents a scanner device."""
+def has_suffix(filename, suffix):
+    p = pathlib.PurePath(filename)
+    return p.suffix == ("." + suffix)
 
-    backend='scanimage'
+def with_suffix(filename, suffix):
+    p = pathlib.PurePath(filename)
+    return str(p.with_suffix("." + suffix))
 
-    def __init__(self, name, device, scan_area, modes=None, resolutions=None, sources=None):
-        self.name = name
-        self.device_id = device
-        self.scan_area = scan_area
-        self.papersizes = { p: PAPERSIZES[p] for p in PAPERSIZES if scan_area.can_cover(PAPERSIZES[p]) }
-        self.modes = modes
-        self.resolutions = resolutions
-        self.sources = sources
-        self.format = 'png'
-        self.dryrun = False
-
-    def _arguments(self, papersize='a4', mode=None, resolution=None, source=None, custom=[]):
-        if papersize not in self.papersizes:
-            raise Exception("Scanner {} cannot scan papersize {}".format(self.name, papersize))
-        cmd = [self.backend, '--device-name', self.device_id, '--format', self.format]
-        cmd.extend(self.papersizes[papersize].arguments())
-        cmd.extend(self.modes.arguments(mode))
-        cmd.extend(self.resolutions.arguments(resolution))
-        cmd.extend(self.sources.arguments(source))
-        cmd.extend(custom)
-        return cmd
-
-    def scan(self, output, papersize='a4', mode=None, resolution=None, source=None, custom=[]):
-        cmd = self.arguments(papersize, mode, resolution, source, custom)
-        if self.dryrun:
-            print(" -> %s", " ".join(cmd))
-            return
-        with open(output, 'w') as file:
-            result = subprocess.run(
-                cmd,
-                stdout=file,
-                stderr=subprocess.PIPE,
-                universal_newlines=True
-            )
-            if result.returncode != 0:
-                print("Error running: %s" % " ".join(cmd))
-                print(result.stderr)
-                raise ChildProcessError()
+def with_presuffix(filename, presuffix):
+    p = pathlib.PurePath(filename)
+    return str(p.with_suffix("." + presuffix + p.suffix))
 
 
-BROTHER_MFC_J5730DW = Scanner(
-    'Brother MFC-J5730DW',
-    'brother4:net1;dev0',
-    Papersize(228, 302),
-    modes=CommandOption('--mode', 'color', {
-        'bw':      'Black & White',
-        'diffuse': 'Gray[Error Diffusion]',
-        'gray':    'True Gray',
-        'color':   '24bit Color[Fast]',
-    }),
-    resolutions=CommandOption('--resolution', '200', {
-        '100':  '100',
-        '150':  '150',
-        '200':  '200',
-        '300':  '300',
-        '400':  '400',
-        '600':  '600',
-        '1200': '1200',
-        '2400': '2400',
-        '4800': '4800',
-        '9600': '9600dpi',
-    }),
-    sources=CommandOption('--source', None, {
-        'flatbed':          'FlatBed',
-        'adf-left':         'Automatic Document Feeder(left aligned)',
-        'adf-left-duplex':  'Automatic Document Feeder(left aligned,Duplex)',
-        'adf-center':       'Automatic Document Feeder(centrally aligned)',
-        'adf-center_duplex':'Automatic Document Feeder(centrally aligned,Duplex)',
-    }),
-)
-
-DEFAULT_SCANNER = BROTHER_MFC_J5730DW
-
-SCANNERS = {
-    'file':    FILE_INPUT,
-    'brother': BROTHER_MFC_J5730DW,
-}
-
-
-class Pipeline:
-    pass
-
-class Formatter:
-    """Represents an output format to use."""
+class Processor:
+    binary = "false"
 
     def __init__(self):
-        pass
+        if shutil.which(self.binary) is None:
+            raise Exception(f"cannot find executable {self.binary}")
 
-    def process(self, scanner, output, arguments):
-        scanner.scan(output, **arguments)
+    def run_cmd(cls, cmd, stdin=None, stdout=None):
+        result = subprocess.run(
+            cmd,
+            stdin=stdin,
+            stdout=stdout,
+            stderr=subprocess.PIPE,
+            universal_newlines=True
+        )
+        if result.returncode != 0:
+            print("Error:")
+            print(result.stderr)
+            raise ChildProcessError()
 
-class ScanFormatter(Formatter):
-    pass
+    def command(self, input_file, output_file):
+        return [self.binary]
 
-class PdfFormatter(Formatter):
-    tesseract='tesseract'
+    def process(self, input_file, output_file):
+        cmd = self.command(input_file, output_file)
+        self.run_cmd(cmd)
 
-    def __init__(self, language='eng')
+
+class Option:
+    """Represents an option with several available choices."""
+
+    def __init__(self, default, choices):
+        self.default = default
+        self.choices = choices
+
+    def args(self, value):
+        if value is None:
+            if self.default is None:
+                return []
+            else:
+                value = self.default
+        if value in self.choices:
+            return self.choices[value]
+        else:
+            raise Exception(f"unknown option {value}, require one of {self.choices}")
+
+
+class Scanner(Processor):
+    """
+    Base class for all scanner devices.
+    The following class variables need to be defined for inheriting types::
+
+        name = str
+        device = str
+        papersizes = Option
+        modes = Option
+        resolutions = Option
+        sources = Option
+    """
+
+    binary = 'scanimage'
+    filetype = 'png'
+
+    def __init__(self, config):
+        """
+        Initialize a single scan instance, with the following read keys::
+
+            papersize
+            mode
+            resolution
+            source
+        """
+        Processor.__init__(self)
+        self.config = config
+
+    def command(self, input_file, output_file):
+        if input_file is None:
+            input_file = self.device
+        cmd = [self.binary, '--device-name', input_file, '--format', self.filetype]
+        if 'papersize' in self.config:
+            cmd.extend(self.papersizes.args(self.config['papersize']).args())
+        if 'mode' in self.config:
+            cmd.extend(self.modes.args(self.config['mode']))
+        if 'resolution' in self.config:
+            cmd.extend(self.resolutions.args(self.config['resolution']))
+        if 'source' in self.config:
+            cmd.extend(self.sources.args(self.config['source']))
+        return cmd
+
+
+class Brother_MFC_J5730DW(Scanner):
+    name = 'Brother MFC-J5730DW'
+    device = 'brother4:net1;dev0'
+    papersizes = Option('a4', {
+        p: PAPERSIZES[p] for p in PAPERSIZES if Papersize(228, 302).can_cover(PAPERSIZES[p])
+    })
+    modes = Option('color', {
+        'bw':      ['--mode', 'Black & White'],
+        'diffuse': ['--mode', 'Gray[Error Diffusion]'],
+        'gray':    ['--mode', 'True Gray'],
+        'color':   ['--mode', '24bit Color[Fast]'],
+    })
+    resolutions = Option('200', {
+        '100':  ['--resolution', '100'],
+        '150':  ['--resolution', '150'],
+        '200':  ['--resolution', '200'],
+        '300':  ['--resolution', '300'],
+        '400':  ['--resolution', '400'],
+        '600':  ['--resolution', '600'],
+        '1200': ['--resolution', '1200'],
+        '2400': ['--resolution', '2400'],
+        '4800': ['--resolution', '4800'],
+        '9600': ['--resolution', '9600dpi'],
+    })
+    sources = Option('auto', {
+        'auto':              [],
+        'flatbed':           ['--source', 'FlatBed'],
+        'adf-left':          ['--source', 'Automatic Document Feeder(left aligned)'],
+        'adf-left-duplex':   ['--source', 'Automatic Document Feeder(left aligned,Duplex)'],
+        'adf-center':        ['--source', 'Automatic Document Feeder(centrally aligned)'],
+        'adf-center_duplex': ['--source', 'Automatic Document Feeder(centrally aligned,Duplex)'],
+    })
+
+
+class Tesseract(Processor):
+    """Create a searchable PDF by using the Tesseract OCR system."""
+
+    binary = 'tesseract'
+    filetype = 'pdf'
+
+    def __init__(self, language='eng+deu'):
+        Processor.__init__(self)
         self.language = language
 
-FORMATTERS = {
-    'raw': RawFormatter(),
-}
+    def command(self, input_file, output_file):
+        if has_suffix(output_file, self.filetype):
+            output_file = output_file[:-(len(self.filetype)+1)]
+        cmd = [self.binary, input_file, output_file]
+        cmd.extend(['-l', self.language])
+        cmd.extend([self.filetype])
+        return cmd
+
+
+class Convert(Processor):
+    """Create a smaller file by compressing the image with ImageMagick."""
+
+    binary = 'convert'
+    profiles = Option('original', {
+        'original': [],
+        'scan':     ["-normalize", "-level", "10%,90%", "-sharpen", "0x1"],
+        'highlight':["-normalize", "-selective-blur", "0x4+10%", "-level", "10%,90%", "-sharpen", "0x1", "-brightness-contrast", "0x25"],
+    })
+    qualities = Option('original', {
+        'original': [],
+        'xl':       ["-depth", "8", "-quality", "50%", "-density", "300x300"],
+        'l':        ["-resample", "50%", "-depth", "8", "-quality", "50%", "-density", "150x150"],
+        'm':        ["-resample", "37%", "-depth", "8", "-quality", "50%", "-density", "111x111"],
+        's':        ["-resample", "25%", "-depth", "8", "-quality", "50%", "-density", "75x75"],
+        'xs':       ["-resample", "20%", "-depth", "8", "-quality", "50%", "-density", "60x60"],
+        'xxs':      ["-resample", "15%", "-depth", "8", "-quality", "50%", "-density", "45x45"],
+        'xxxs':     ["-resample", "10%", "-depth", "8", "-quality", "50%", "-density", "30x30"],
+    })
+
+    def __init__(self, profile, quality):
+        Processor.__init__(self)
+        self.profile = profile
+        self.quality = quality
+
+    def command(self, input_file, output_file):
+        if input_file == output_file:
+            raise Exception(f"input {input_file} and output {output_file} are the same")
+        cmd = [self.binary, input_file]
+        cmd.extend(self.profiles.args(self.profile))
+        cmd.extend(self.qualities.args(self.quality))
+        cmd.append(output_file)
+        return cmd
+
+class Unpaper(Processor):
+    """Create a smaller file by compressing the image with Unpaper."""
+
+    binary = 'unpaper'
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description='Scan from Brother MFC-J5730DW to OCR PDF.',
+        description='Scan from your scanner to searchable PDF.',
     )
     parser.add_argument(
         'output',
         help='output file',
     )
+    parser.add_argument(
+        '-n, --dry-run',
+        dest='dryrun',
+        action='store_true',
+        help='show which commands would be executed',
+    )
+    parser.add_argument(
+        '-c, --clean',
+        dest='clean',
+        default=0,
+        action='count',
+        help='clean up intermediary (1) and input (2)',
+    )
+
+    # Scanner options:
+    DEFAULT_SCANNER = Brother_MFC_J5730DW
+    SCANNERS = {
+        'brother': Brother_MFC_J5730DW,
+    }
+    def make_scanner(args):
+        return SCANNERS[args.backend]({
+            'papersize': args.papersize,
+            'mode': args.mode,
+            'resolution': args.resolution,
+            'source': args.source,
+        })
     parser.add_argument(
         '-b, --backend',
         dest='backend',
@@ -291,64 +370,130 @@ if __name__ == "__main__":
         choices=SCANNERS,
         help='backend scanner device to use',
     )
-
-    # Backend::File options:
     parser.add_argument(
-        '-i, --input-file',
-        dest='file_input',
-        takes_value=True,
-        help='input file for file backend',
+        '-d, --device',
+        dest='device',
+        default=None,
+        help='scanner device identifier',
     )
-
-    # Backend::Scanner options:
     parser.add_argument(
         '-p, --papersize',
-        dest='scanner_papersize',
+        dest='papersize',
         default='a4',
-        choices=DEFAULT_SCANNER.papersizes,
+        choices=DEFAULT_SCANNER.papersizes.choices,
         help='input scan area as paper size',
     )
     parser.add_argument(
         '-s, --source',
-        dest='scanner_source',
+        dest='source',
         default=None,
         choices=DEFAULT_SCANNER.sources.choices,
-        help='input source, such as flatbed or adf',
+        help='input scan source, such as flatbed or adf',
     )
     parser.add_argument(
         '-r, --resolution',
-        dest='scanner_resolution',
+        dest='resolution',
         default=None,
         choices=DEFAULT_SCANNER.resolutions.choices,
-        help='input resolution in DPI',
+        help='input scan resolution, in DPI',
     )
     parser.add_argument(
         '-m, --mode',
-        dest='scanner_mode',
+        dest='mode',
         default=None,
         choices=DEFAULT_SCANNER.modes.choices,
         help='input scan mode, such as black&white or color',
     )
 
-    # Formatter options:
+    # Post-processing options:
+    def make_tesseract(args):
+        return Tesseract(args.language)
+    def make_convert(args):
+        return Convert(args.profile, args.quality)
+    def make_unpaper(args):
+        return Unpaper()
+    FILTERS = {
+        'tesseract': make_tesseract,
+        'convert': make_convert,
+        'unpaper': make_unpaper,
+    }
     parser.add_argument(
-        '-f, --formatter',
-        dest='formatter',
-        default='raw',
-        choices=FORMATTERS,
+        '-f, --filter',
+        dest='filters',
+        action='append',
+        choices=FILTERS,
         help='profiles for post-processing and output format',
     )
+    parser.add_argument(
+        '-l, --language',
+        dest='language',
+        default='eng+deu',
+        help='language the input should be interpreted in [tesseract]',
+    )
+    parser.add_argument(
+        '-q, --quality',
+        dest='quality',
+        choices=Convert.qualities.choices,
+        help='output quality of image [convert]',
+    )
+    parser.add_argument(
+        '-t, --profile',
+        dest='profile',
+        choices=Convert.profiles.choices,
+        help='output postprocessing profile of image [convert]',
+    )
+
+    # Run the program:
     args = parser.parse_args()
 
-    scanner = SCANNERS[args.backend]
-    formatter = FORMATTERS[args.formatter]
-    formatter.process(
-        scanner,
-        args.output,
-        arguments = {
-            papersize=args.scanner_papersize,
-            mode=args.scanner_mode,
-            resolution=args.scanner_resolution,
-            source=args.scanner_source,
-        }
-    )
+    def info(msg):
+        print(f"{Color.BOLD}:: {msg}{Color.END}")
+    def debug(msg):
+        if args.dryrun: print(f"{Color.GRAY} > { msg }{Color.END}")
+        else: print(f"{Color.RED}->{Color.GRAY} { msg }{Color.END}")
+    def execute(who, input_file, output_file):
+        cmd = who.command(input_file, output_file)
+        debug(' '.join(cmd))
+        if not args.dryrun:
+            who.process(input_file, output_file)
+
+    scanner = make_scanner(args)
+    pipeline = [ FILTERS[f](args) for f in args.filters if f in FILTERS ]
+    input_file = scanner.device if args.device is None else args.device
+    output_file = with_suffix(args.output, scanner.filetype)
+    original_scan = output_file
+
+    # Scan image if file doesn't exist:
+    if os.path.exists(output_file) and args.clean < 3:
+        info(f"Read file {output_file}")
+    else:
+        info(f"Scan from {scanner.name}")
+        with open(output_file, 'w') as file:
+            execute(scanner, input_file, file)
+
+    # Apply post-processing:
+    stage = 0
+    input_file = output_file
+    for p in pipeline:
+        stage += 1
+        if 'filetype' in dir(p):
+            output_file = with_suffix(output_file, p.filetype)
+        if p.binary != scanner.binary:
+            output_file = with_presuffix(output_file, p.binary)
+
+        info(f"Transform {input_file} => {output_file}")
+        execute(p, input_file, output_file)
+        if stage > 1 and args.clean > 0:
+            debug(f"rm {input_file}")
+            if not args.dryrun: os.remove(input_file)
+        input_file = output_file
+
+    if stage != 0 and has_suffix(output_file, 'pdf'):
+        output_file = with_suffix(args.output, 'pdf')
+        debug(f"mv {input_file} {output_file}")
+        if not args.dryrun: shutil.move(input_file, output_file)
+
+    if args.clean >= 2:
+        assert(output_file != original_scan)
+        debug(f"rm {original_scan}")
+        if not args.dryrun: os.remove(original_scan)

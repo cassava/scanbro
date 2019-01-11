@@ -41,6 +41,7 @@ class Color:
    UNDERLINE = '\033[4m'
    END = '\033[0m'
 
+
 class Geometry:
     """Represents a geometry in millimeters that can be scanned."""
 
@@ -169,9 +170,9 @@ class Processor:
     def command(self, input_file, output_file):
         return [self.binary]
 
-    def process(self, input_file, output_file):
+    def process(self, input_file, output_file, stdin=None, stdout=None):
         cmd = self.command(input_file, output_file)
-        self.run_cmd(cmd)
+        self.run_cmd(cmd, stdin, stdout)
 
 
 class Option:
@@ -329,6 +330,48 @@ class Unpaper(Processor):
     binary = 'unpaper'
 
 
+class Ghostscript(Processor):
+    """
+    Ghostscript preserves any text information that is in the PDF,
+    and is in this way useful to apply to a PDF that has been
+    augmented by tesseract.
+    """
+
+    binary = 'gs'
+    profiles = Option('printer', {
+        'default':  ['-dPDFSETTINGS=/default'],
+        'screen':   ['-dPDFSETTINGS=/screen'],
+        'ebook':    ['-dPDFSETTINGS=/ebook'],
+        'printer':  ['-dPDFSETTINGS=/printer'],
+        'prepress': ['-dPDFSETTINGS=/prepress'],
+    })
+
+    def __init__(self, profile='printer'):
+        self.profile = profile
+
+    def command(self, input_file, output_file):
+        cmd = [
+            self.binary,
+            '-sDEVICE=pdfwrite',
+            '-dCompatibilityLevel=1.4',
+            '-dCompressFonts=true',
+            '-dEmbedAllFonts=false',
+            '-dSubsetFonts=true',
+            '-dConvertCMYKImagesToRGB=true',
+            '-sProcessColorModel=DeviceGray',
+            '-sColorConversionStrategy=Gray',
+            '-dOverrideICC',
+            '-dNOPAUSE',
+            '-dSAFER',
+            '-dQUIET',
+            '-dBATCH',
+            f"-sOutputFile={output_file}",
+        ]
+        cmd.extend(self.profiles.args(self.profile))
+        cmd.append(input_file)
+        return cmd
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description='Scan from your scanner to searchable PDF.',
@@ -409,17 +452,23 @@ if __name__ == "__main__":
     def make_tesseract(args):
         return Tesseract(args.language)
     def make_convert(args):
-        return Convert(args.profile, args.quality)
+        return Convert(args.convert_profile, args.convert_quality)
     def make_unpaper(args):
         return Unpaper()
+    def make_ghostscript(args):
+        return Ghostscript(args.gs_profile)
+
     FILTERS = {
-        'tesseract': make_tesseract,
         'convert': make_convert,
         'unpaper': make_unpaper,
+        'tesseract': make_tesseract,
+        'ghostscript': make_ghostscript,
     }
+
     parser.add_argument(
         '-f, --filter',
         dest='filters',
+        default=[],
         action='append',
         choices=FILTERS,
         help='profiles for post-processing and output format',
@@ -431,16 +480,22 @@ if __name__ == "__main__":
         help='language the input should be interpreted in [tesseract]',
     )
     parser.add_argument(
-        '-q, --quality',
-        dest='quality',
+        '-q, --convert-quality',
+        dest='convert_quality',
         choices=Convert.qualities.choices,
         help='output quality of image [convert]',
     )
     parser.add_argument(
-        '-t, --profile',
-        dest='profile',
+        '-t, --convert-profile',
+        dest='convert_profile',
         choices=Convert.profiles.choices,
         help='output postprocessing profile of image [convert]',
+    )
+    parser.add_argument(
+        '-g, --gs-profile',
+        dest='gs_profile',
+        choices=Ghostscript.profiles.choices,
+        help='output compression profile of image [ghostscript]',
     )
 
     # Run the program:
@@ -451,11 +506,11 @@ if __name__ == "__main__":
     def debug(msg):
         if args.dryrun: print(f"{Color.GRAY} > { msg }{Color.END}")
         else: print(f"{Color.RED}->{Color.GRAY} { msg }{Color.END}")
-    def execute(who, input_file, output_file):
+    def execute(who, input_file, output_file, stdin=None, stdout=None):
         cmd = who.command(input_file, output_file)
         debug(' '.join(cmd))
         if not args.dryrun:
-            who.process(input_file, output_file)
+            who.process(input_file, output_file, stdin, stdout)
 
     scanner = make_scanner(args)
     pipeline = [ FILTERS[f](args) for f in args.filters if f in FILTERS ]
@@ -469,7 +524,7 @@ if __name__ == "__main__":
     else:
         info(f"Scan from {scanner.name}")
         with open(output_file, 'w') as file:
-            execute(scanner, input_file, file)
+            execute(scanner, input_file, output_file, stdout=file)
 
     # Apply post-processing:
     stage = 0

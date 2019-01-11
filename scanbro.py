@@ -290,10 +290,16 @@ class Tesseract(Processor):
         return cmd
 
 
-class Convert(Processor):
-    """Create a smaller file by compressing the image with ImageMagick."""
+class ImageMagick(Processor):
+    """
+    Compress the image with ImageMagick.
+
+    This is inappropriate for compressing PDFs, as the display size does not
+    remain constant and any text information in the PDF is discarded.
+    """
 
     binary = 'convert'
+    filetype = 'png'
     profiles = Option('original', {
         'original': [],
         'scan':     ["-normalize", "-level", "10%,90%", "-sharpen", "0x1"],
@@ -324,20 +330,16 @@ class Convert(Processor):
         cmd.append(output_file)
         return cmd
 
-class Unpaper(Processor):
-    """Create a smaller file by compressing the image with Unpaper."""
-
-    binary = 'unpaper'
-
-
 class Ghostscript(Processor):
     """
-    Ghostscript preserves any text information that is in the PDF,
-    and is in this way useful to apply to a PDF that has been
-    augmented by tesseract.
+    Compress the PDF with Ghostscript.
+
+    Ghostscript preserves any text information that is in the PDF, and is in
+    this way useful to apply to a PDF that has been augmented by tesseract.
     """
 
     binary = 'gs'
+    filetype = 'pdf'
     profiles = Option('printer', {
         'default':  ['-dPDFSETTINGS=/default'],
         'screen':   ['-dPDFSETTINGS=/screen'],
@@ -345,28 +347,30 @@ class Ghostscript(Processor):
         'printer':  ['-dPDFSETTINGS=/printer'],
         'prepress': ['-dPDFSETTINGS=/prepress'],
     })
+    modes = Option('color', {
+        'color': [],
+        'gray': ['-dConvertCMYKImagesToRGB=true', '-sProcessColorModel=DeviceGray', '-sColorConversionStrategy=Gray', '-dOverrideICC'],
+    })
 
-    def __init__(self, profile='printer'):
+    def __init__(self, profile='printer', mode='color'):
         self.profile = profile
+        self.mode = mode
 
     def command(self, input_file, output_file):
         cmd = [
             self.binary,
+            '-dNOPAUSE',
+            '-dSAFER',
+            '-dQUIET',
+            '-dBATCH',
             '-sDEVICE=pdfwrite',
             '-dCompatibilityLevel=1.4',
             '-dCompressFonts=true',
             '-dEmbedAllFonts=false',
             '-dSubsetFonts=true',
-            '-dConvertCMYKImagesToRGB=true',
-            '-sProcessColorModel=DeviceGray',
-            '-sColorConversionStrategy=Gray',
-            '-dOverrideICC',
-            '-dNOPAUSE',
-            '-dSAFER',
-            '-dQUIET',
-            '-dBATCH',
             f"-sOutputFile={output_file}",
         ]
+        cmd.extend(self.modes.args(self.mode))
         cmd.extend(self.profiles.args(self.profile))
         cmd.append(input_file)
         return cmd
@@ -436,7 +440,7 @@ if __name__ == "__main__":
     parser.add_argument(
         '-r, --resolution',
         dest='resolution',
-        default=None,
+        default='300',
         choices=DEFAULT_SCANNER.resolutions.choices,
         help='input scan resolution, in DPI',
     )
@@ -452,15 +456,12 @@ if __name__ == "__main__":
     def make_tesseract(args):
         return Tesseract(args.language)
     def make_convert(args):
-        return Convert(args.convert_profile, args.convert_quality)
-    def make_unpaper(args):
-        return Unpaper()
+        return ImageMagick(args.im_profile, args.convert_quality)
     def make_ghostscript(args):
         return Ghostscript(args.gs_profile)
 
     FILTERS = {
-        'convert': make_convert,
-        'unpaper': make_unpaper,
+        'imagemagick': make_convert,
         'tesseract': make_tesseract,
         'ghostscript': make_ghostscript,
     }
@@ -471,7 +472,7 @@ if __name__ == "__main__":
         default=[],
         action='append',
         choices=FILTERS,
-        help='profiles for post-processing and output format',
+        help='filters for post-processing and output format',
     )
     parser.add_argument(
         '-l, --language',
@@ -480,22 +481,28 @@ if __name__ == "__main__":
         help='language the input should be interpreted in [tesseract]',
     )
     parser.add_argument(
-        '-q, --convert-quality',
-        dest='convert_quality',
-        choices=Convert.qualities.choices,
-        help='output quality of image [convert]',
+        '-i, --im-profile',
+        dest='im_profile',
+        choices=ImageMagick.profiles.choices,
+        help='output postprocessing profile of image [imagemagick]',
     )
     parser.add_argument(
-        '-t, --convert-profile',
-        dest='convert_profile',
-        choices=Convert.profiles.choices,
-        help='output postprocessing profile of image [convert]',
+        '-q, --im-quality',
+        dest='convert_quality',
+        choices=ImageMagick.qualities.choices,
+        help='output quality of image [imagemagick]',
     )
     parser.add_argument(
         '-g, --gs-profile',
         dest='gs_profile',
         choices=Ghostscript.profiles.choices,
-        help='output compression profile of image [ghostscript]',
+        help='output compression profile of PDF [ghostscript]',
+    )
+    parser.add_argument(
+        '-e, --gs-mode',
+        dest='gs_mode',
+        choices=Ghostscript.modes.choices,
+        help='output color mode of PDF [ghostscript]',
     )
 
     # Run the program:

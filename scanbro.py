@@ -217,7 +217,7 @@ class Scanner(Processor):
     """
 
     binary = 'scanimage'
-    filetype = 'png'
+    filetype = 'tiff'
     multiple_out = True
 
     def __init__(self, config):

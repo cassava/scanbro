@@ -618,6 +618,12 @@ if __name__ == "__main__":
         action='count',
         help='clean up intermediary (1) and input (2)',
     )
+    parser.add_argument(
+        '-v', '--verify',
+        dest='verify',
+        action='store_true',
+        help='show first file from final output with exo-open',
+    )
 
     # Scanner options:
     DEFAULT_SCANNER = Brother_MFC_J5730DW
@@ -773,3 +779,5 @@ if __name__ == "__main__":
         trim=args.trim,
         dryrun=args.dryrun,
     )
+    if args.verify:
+        Processor.run_cmd(['exo-open', output[0]])

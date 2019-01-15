@@ -485,7 +485,7 @@ class Ghostscript(Processor):
         cmd = self.command(input_file, output_file)
         self.run_cmd(cmd, stdin, stdout)
 
-def scanbro(scanner, pipeline, output_name, clean=0, dryrun=False):
+def scanbro(scanner, pipeline, output_name, clean=0, trim=False, dryrun=False):
     """
     Do the hard work of scanning to one or more files and processing
     these with any of the post-processing filters selected.
@@ -513,11 +513,37 @@ def scanbro(scanner, pipeline, output_name, clean=0, dryrun=False):
     if not scanner.exists(output_file) or clean >= 3:
         info(f'Scan from {scanner.name}')
         execute(scanner, None, output_file)
+    else:
+        # Only allow trim if we actually scanned!
+        trim = False
     scanned_files = scanner.output(output_file)
-    assert(len(scanned_files) != 0)
-    info(f'Read file(s) { ", ".join(scanned_files) }')
 
-    # Quit early if there are no stages in the pipeline
+    # Check that we actually have the files we claim.
+    n = len(scanned_files)
+    if n == 0:
+        raise Exception("expected output files from scanner, found nothing")
+
+    # Trim the last page from the scanned files, if we did not
+    # scan in this run, trim will be set to false above.
+    if trim:
+        if n == 1:
+            raise Exception("cannot trim the only file scanned")
+        elif n < 4:
+            raise Exception("trim expects at least 4 scan files")
+        else:
+            trim_file = scanned_files.pop()
+            info(f'Trim last scan file {trim_file}')
+            os.remove(trim_file)
+
+    # Print the filenames of the input files.
+    if n == 1:
+        info(f'Read file {scanned_files[0]}')
+    else:
+        info('Read files:')
+        for file in scanned_files:
+            print(f'   {file}')
+
+    # Quit early if there are no stages in the pipeline.
     if len(pipeline) == 0:
         return
 
@@ -527,12 +553,13 @@ def scanbro(scanner, pipeline, output_name, clean=0, dryrun=False):
     for p in pipeline:
         stage += 1
         if p.multiple_in:
-            # Currently, only the scanner can create multiple output files
+            # Currently, only the scanner can create multiple output files,
+            # so we assume that multiple in means single out.
             assert(not p.multiple_out)
             part = input_files[0].rpartition('.1')
             output_files = [ p.suffix(part[0] + part[2]) ]
             info(f'Transform [{input_files[0]} ...] => {prototype}')
-            execute(p, input_files, output_file[0])
+            execute(p, input_files, output_files[0])
         else:
             output_files = []
             prototype = p.suffix(input_files[0])
@@ -562,10 +589,12 @@ def scanbro(scanner, pipeline, output_name, clean=0, dryrun=False):
 
     # Removed scanned images, if they differ from the final output
     if clean >= 2 and final_output != scanned_files:
-        for file in original_scan:
+        for file in scanned_files:
             assert(file not in final_output)
             debug(f'rm {file}')
             if not dryrun: os.remove(file)
+
+    return final_output
 
 
 if __name__ == "__main__":
@@ -649,6 +678,12 @@ if __name__ == "__main__":
         choices=DEFAULT_SCANNER.modes.choices,
         help='input scan mode, such as black&white or color',
     )
+    parser.add_argument(
+        '-t', '--trim-last',
+        dest='trim',
+        action='store_true',
+        help='discard last page of scan, useful for duplex scans',
+    )
 
     # Post-processing options:
     def make_unpaper(args):
@@ -730,4 +765,11 @@ if __name__ == "__main__":
     pipeline = [ FILTERS[f](args) for f in FILTERS if f in args.filters ]
 
     # Do the real work :-D
-    scanbro(scanner, pipeline, args.output, args.clean, args.dryrun)
+    output = scanbro(
+        scanner,
+        pipeline,
+        args.output,
+        clean=args.clean,
+        trim=args.trim,
+        dryrun=args.dryrun,
+    )

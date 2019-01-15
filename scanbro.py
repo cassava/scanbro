@@ -398,26 +398,60 @@ class Ghostscript(Processor):
 
     Ghostscript preserves any text information that is in the PDF, and is in
     this way useful to apply to a PDF that has been augmented by tesseract.
+
+    See: https://www.ghostscript.com/doc/9.26/VectorDevices.htm
     """
 
     binary = 'gs'
     filetype = 'pdf'
     multiple_in = True
-    profiles = Option('printer', {
-        'default':  ['-dPDFSETTINGS=/default'],
-        'screen':   ['-dPDFSETTINGS=/screen'],
-        'ebook':    ['-dPDFSETTINGS=/ebook'],
-        'printer':  ['-dPDFSETTINGS=/printer'],
-        'prepress': ['-dPDFSETTINGS=/prepress'],
-    })
-    modes = Option('color', {
-        'color': [],
-        'gray': ['-dConvertCMYKImagesToRGB=true', '-sProcessColorModel=DeviceGray', '-sColorConversionStrategy=Gray', '-dOverrideICC'],
+    profiles = Option('high', {
+        # Default profiles:
+        # 'default':  ['-dPDFSETTINGS=/default'],
+        # 'screen':   ['-dPDFSETTINGS=/screen'],
+        # 'ebook':    ['-dPDFSETTINGS=/ebook'],
+        # 'printer':  ['-dPDFSETTINGS=/printer'],
+        # 'prepress': ['-dPDFSETTINGS=/prepress'],
+
+        # Personal profiles:
+        # ---
+        # low:     gray,  100dpi
+        # medium:  color, 125dpi
+        # high:    color, 150dpi
+        # extreme: color, 300dpi
+        'low': [
+            '-dPDFSETTINGS=/ebook',
+            '-dEmbedAllFonts=false',
+            '-dConvertCMYKImagesToRGB=true',
+            '-dColorImageResolution=100',
+            '-dGrayImageResolution=100',
+            '-dMonoImageResolution=100',
+            '-sColorConversionStrategy=Gray',
+            '-sColorConversionStrategyForImages=Gray',
+        ],
+        'medium': [
+            '-dPDFSETTINGS=/ebook',
+            '-dEmbedAllFonts=false',
+            '-dConvertCMYKImagesToRGB=true',
+            '-dColorImageResolution=125',
+            '-dGrayImageResolution=125',
+            '-dMonoImageResolution=125',
+        ],
+        'high': [
+            '-dPDFSETTINGS=/ebook',
+            '-dEmbedAllFonts=false',
+            '-dColorImageResolution=150',
+            '-dGrayImageResolution=150',
+            '-dMonoImageResolution=150',
+        ],
+        'extreme': [
+            '-dPDFSETTINGS=/printer',
+        ],
     })
 
-    def __init__(self, profile='printer', mode='color'):
+    def __init__(self, profile='high', benchmark=False):
         self.profile = profile
-        self.mode = mode
+        self.benchmark = benchmark
 
     def command(self, input_files, output_file):
         cmd = [
@@ -427,16 +461,29 @@ class Ghostscript(Processor):
             '-dQUIET',
             '-dBATCH',
             '-sDEVICE=pdfwrite',
-            '-dCompatibilityLevel=1.4',
-            '-dCompressFonts=true',
-            '-dEmbedAllFonts=false',
-            '-dSubsetFonts=true',
+            '-dCompatibilityLevel=1.7',
             f'-sOutputFile={output_file}',
         ]
-        cmd.extend(self.modes.args(self.mode))
         cmd.extend(self.profiles.args(self.profile))
         cmd.extend(input_files)
         return cmd
+
+    def process(self, input_file, output_file, stdin=None, stdout=None):
+        if self.benchmark:
+            print('Ghostscript benchmark requested.')
+            print('--------------------------------')
+            original_profile = self.profile
+            for profile in self.profiles.choices:
+                self.profile = profile
+                profile_output = with_presuffix(output_file, profile)
+                print(f'Create {profile_output}')
+                cmd = self.command(input_file, profile_output)
+                self.run_cmd(cmd, None, None)
+            print('--------------------------------')
+            self.profile = original_profile
+
+        cmd = self.command(input_file, output_file)
+        self.run_cmd(cmd, stdin, stdout)
 
 def scanbro(scanner, pipeline, output_name, clean=0, dryrun=False):
     """
@@ -611,7 +658,7 @@ if __name__ == "__main__":
     def make_tesseract(args):
         return Tesseract(args.language)
     def make_ghostscript(args):
-        return Ghostscript(args.gs_profile, args.gs_mode)
+        return Ghostscript(args.gs_profile, args.gs_benchmark)
 
     FILTERS = {
         'imagemagick': make_imagemagick,
@@ -650,7 +697,13 @@ if __name__ == "__main__":
         '-g', '--gs-profile',
         dest='gs_profile',
         choices=Ghostscript.profiles.choices,
-        help='output compression profile of PDF (default=printer) [ghostscript]',
+        help='output compression profile of PDF (default=high) [ghostscript]',
+    )
+    parser.add_argument(
+        '--gs-benchmark',
+        dest='gs_benchmark',
+        action='store_true',
+        help='benchmark the suite of profiles [ghostscript]',
     )
     parser.add_argument(
         '-a', '--auto',

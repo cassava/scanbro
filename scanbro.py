@@ -159,7 +159,8 @@ class Processor:
         if shutil.which(self.binary) is None:
             raise Exception(f"cannot find executable {self.binary}")
 
-    def run_cmd(cls, cmd, stdin=None, stdout=None):
+    @staticmethod
+    def run_cmd(cmd, stdin=None, stdout=None):
         result = subprocess.run(
             cmd,
             stdin=stdin,

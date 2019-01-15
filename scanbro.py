@@ -22,6 +22,9 @@
 # SOFTWARE.
 #
 
+# This tool cannot solve all your problems. For those remaining, have a look
+# at some of the recipes here: https://jon.dehdari.org/tutorials/pdf_tricks.html
+
 import argparse
 import subprocess
 import os

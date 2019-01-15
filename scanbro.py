@@ -530,13 +530,13 @@ if __name__ == "__main__":
         help='output file',
     )
     parser.add_argument(
-        '-n, --dry-run',
+        '-n', '--dry-run',
         dest='dryrun',
         action='store_true',
         help='show which commands would be executed',
     )
     parser.add_argument(
-        '-c, --clean',
+        '-c', '--clean',
         dest='clean',
         default=0,
         action='count',
@@ -562,41 +562,41 @@ if __name__ == "__main__":
         return scanner
 
     parser.add_argument(
-        '-b, --backend',
+        '-b', '--backend',
         dest='backend',
         default='brother',
         choices=SCANNERS,
-        help='backend scanner device to use',
+        help='backend scanner device to use (default=brother)',
     )
     parser.add_argument(
-        '-d, --device',
+        '-d', '--device',
         dest='device',
         default=None,
         help='scanner device identifier',
     )
     parser.add_argument(
-        '-p, --papersize',
+        '-p', '--papersize',
         dest='papersize',
         default='a4',
         choices=DEFAULT_SCANNER.papersizes.choices,
-        help='input scan area as paper size',
+        help='input scan area as paper size (default=a4)',
     )
     parser.add_argument(
-        '-s, --source',
+        '-s', '--source',
         dest='source',
         default=None,
         choices=DEFAULT_SCANNER.sources.choices,
         help='input scan source, such as flatbed or adf',
     )
     parser.add_argument(
-        '-r, --resolution',
+        '-r', '--resolution',
         dest='resolution',
         default='300',
         choices=DEFAULT_SCANNER.resolutions.choices,
-        help='input scan resolution, in DPI',
+        help='input scan resolution, in DPI (default=300)',
     )
     parser.add_argument(
-        '-m, --mode',
+        '-m', '--mode',
         dest='mode',
         default=None,
         choices=DEFAULT_SCANNER.modes.choices,
@@ -621,7 +621,7 @@ if __name__ == "__main__":
     }
 
     parser.add_argument(
-        '-f, --filter',
+        '-f', '--filter',
         dest='filters',
         default=[],
         action='append',
@@ -629,37 +629,31 @@ if __name__ == "__main__":
         help='filters for post-processing and output format',
     )
     parser.add_argument(
-        '-l, --language',
+        '-l', '--language',
         dest='language',
         default='eng+deu',
         help='language the input should be interpreted in [tesseract]',
     )
     parser.add_argument(
-        '-i, --im-profile',
+        '-i', '--im-profile',
         dest='im_profile',
         choices=ImageMagick.profiles.choices,
         help='output postprocessing profile of image [imagemagick]',
     )
     parser.add_argument(
-        '-q, --im-quality',
+        '-q', '--im-quality',
         dest='convert_quality',
         choices=ImageMagick.qualities.choices,
         help='output quality of image [imagemagick]',
     )
     parser.add_argument(
-        '-g, --gs-profile',
+        '-g', '--gs-profile',
         dest='gs_profile',
         choices=Ghostscript.profiles.choices,
-        help='output compression profile of PDF [ghostscript]',
+        help='output compression profile of PDF (default=printer) [ghostscript]',
     )
     parser.add_argument(
-        '-e, --gs-mode',
-        dest='gs_mode',
-        choices=Ghostscript.modes.choices,
-        help='output color mode of PDF [ghostscript]',
-    )
-    parser.add_argument(
-        '-a, --auto',
+        '-a', '--auto',
         dest='auto',
         action='store_true',
         help='enable recommended post-processing filters',

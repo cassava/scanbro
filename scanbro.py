@@ -270,7 +270,7 @@ class Scanner(Processor):
             '--device-name', input_file,
             '--format', self.filetype,
         ]
-        if not self.is_adf():
+        if self.is_adf():
             cmd.append(f'--batch={output_file}')
         if 'papersize' in self.config:
             cmd.extend(self.papersizes.args(self.config['papersize']).args())

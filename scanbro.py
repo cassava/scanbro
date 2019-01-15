@@ -760,7 +760,6 @@ if __name__ == "__main__":
         # Specific options can be overriden, but certain filters will
         # be enabled and cannot be disabled if --auto is specified.
         args.filters.extend(['tesseract', 'ghostscript'])
-        if args.clean == 0: args.clean = 1
     if 'unpaper' in args.filters:
         # We need to convert from PNM to PNG. The default options for
         # ImageMagick should result in a lossless conversion.

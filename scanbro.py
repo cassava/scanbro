@@ -30,6 +30,7 @@ import subprocess
 import os
 import pathlib
 import shutil
+import tempfile
 
 class Color:
    PURPLE = '\033[95m'
@@ -148,6 +149,10 @@ def with_suffix(filename, suffix):
 def with_presuffix(filename, presuffix):
     p = pathlib.PurePath(filename)
     return str(p.with_suffix("." + presuffix + p.suffix))
+
+def with_filepath(filename, name):
+    p = pathlib.PurePath(filename)
+    return with_suffix(name, p.suffix[1:])
 
 
 class Processor:
@@ -603,6 +608,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         'output',
+        nargs='?',
         help='output file',
     )
     parser.add_argument(
@@ -769,14 +775,56 @@ if __name__ == "__main__":
     scanner = make_scanner(args)
     pipeline = [ FILTERS[f](args) for f in FILTERS if f in args.filters ]
 
+    # If the user did not specify a filename, we put the output files in
+    # a temporary directory and prompt the user to specify the name afterwards.
+    tmpdir = None
+    output = args.output
+    if args.output is None:
+        tmpdir = tempfile.mkdtemp(prefix='scanbro-')
+        output = tmpdir + '/scan'
+
     # Do the real work :-D
     output = scanbro(
         scanner,
         pipeline,
-        args.output,
+        output,
         clean=args.clean,
         trim=args.trim,
         dryrun=args.dryrun,
     )
+
+    assert(len(output) != 0)
     if args.verify:
-        Processor.run_cmd(['exo-open', output[0]])
+        subprocess.Popen(['exo-open', output[0]], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    # If we created a temporary directory, we need to move the final file from
+    # there, by getting a name from the user. Then we delete the temporary
+    # directory.
+    if args.output is None:
+        assert(tmpdir is not None)
+
+        # Set up <TAB> completion
+        import readline, glob
+        def complete(text, state):
+            return (glob.glob(text+'*')+[None])[state]
+        readline.set_completer_delims(' \t\n;')
+        readline.parse_and_bind("tab: complete")
+        readline.set_completer(complete)
+
+        while True:
+            name = input(':: Specify filename: ')
+            if name == '':
+                print(f':: Leaving directory {tmpdir}')
+                break
+            if len(output) == 1:
+                name = with_filepath(output[0], name)
+                if os.path.exists(name):
+                    print(f':: Error, file {name} already exists')
+                    continue
+                shutil.move(output[0], name)
+                os.removedirs(tmpdir)
+                break
+            else:
+                print(f':: Error, do not yet support moving multiple files')
+                print(f':: Leaving directory {tmpdir}')
+                break

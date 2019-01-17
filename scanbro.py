@@ -345,7 +345,7 @@ class Tesseract(Processor):
     binary = 'tesseract'
     filetype = 'pdf'
 
-    def __init__(self, language='eng+deu'):
+    def __init__(self, language='deu'):
         Processor.__init__(self)
         self.language = language
 
@@ -725,7 +725,7 @@ if __name__ == "__main__":
     parser.add_argument(
         '-l', '--language',
         dest='language',
-        default='eng+deu',
+        default='deu',
         help='language the input should be interpreted in [tesseract]',
     )
     parser.add_argument(

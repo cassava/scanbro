@@ -550,7 +550,7 @@ def scanbro(scanner, pipeline, output_name, clean=0, trim=False, dryrun=False):
 
     # Quit early if there are no stages in the pipeline.
     if len(pipeline) == 0:
-        return
+        return scanned_files
 
     # Apply post-processing:
     stage = 0

@@ -355,6 +355,15 @@ class Unpaper(Processor):
     binary = 'unpaper'
     filetype = 'pnm'
 
+    def command(self, input_file, output_file):
+        cmd = [
+            self.binary,
+            input_file,
+            output_file,
+            '--no-blackfilter',
+        ]
+        return cmd
+
 class Tesseract(Processor):
     """Create a searchable PDF by using the Tesseract OCR system."""
 
@@ -725,7 +734,7 @@ if __name__ == "__main__":
 
     # Post-processing options:
     def make_unpaper(args):
-        return Unpaper(args)
+        return Unpaper()
     def make_imagemagick(args):
         return ImageMagick(args.im_profile, args.convert_quality)
     def make_tesseract(args):

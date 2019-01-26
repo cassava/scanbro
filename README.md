@@ -57,3 +57,12 @@ Ghostscript's downsampling is much more effective the higher the DPI of the
 input file.
 
 Enjoy!
+
+### Known Issues
+
+- Dryrun mode does not always work reliably.
+- When specifiying the output name initially, should prompt before
+  overwriting.
+- When `--clean` is specified 3 times, existing files are overwritten, not
+  deleted. This means that it is possible for more files to be in the
+  output that were actually scanned.

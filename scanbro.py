@@ -33,18 +33,34 @@ import shutil
 import tempfile
 
 class Color:
-   PURPLE = '\033[95m'
-   CYAN = '\033[96m'
-   DARKCYAN = '\033[36m'
-   BLUE = '\033[94m'
-   GREEN = '\033[92m'
-   YELLOW = '\033[93m'
-   RED = '\033[91m'
-   GRAY = '\033[90m'
-   BOLD = '\033[1m'
-   UNDERLINE = '\033[4m'
-   END = '\033[0m'
+    PURPLE = '\033[95m'
+    CYAN = '\033[96m'
+    DARKCYAN = '\033[36m'
+    BLUE = '\033[94m'
+    GREEN = '\033[92m'
+    YELLOW = '\033[93m'
+    RED = '\033[91m'
+    GRAY = '\033[90m'
+    BOLD = '\033[1m'
+    UNDERLINE = '\033[4m'
+    END = '\033[0m'
 
+    @staticmethod
+    def debug(msg, dim=False):
+        if dim: print(f"{Color.GRAY} > { msg }{Color.END}")
+        else: print(f"{Color.RED}->{Color.GRAY} { msg }{Color.END}")
+
+    @staticmethod
+    def info(msg, prefix="::"):
+        print(f"{Color.BOLD}{prefix} {msg}{Color.END}")
+
+    @staticmethod
+    def error(msg, prefix="##"):
+        print(f"{Color.RED}{prefix}{Color.END} { msg}")
+
+    @staticmethod
+    def input(msg, prefix="<-"):
+        return input(f"{Color.GREEN}{prefix}{Color.END} { msg }: ")
 
 class Geometry:
     """Represents a geometry in millimeters that can be scanned."""
@@ -494,34 +510,44 @@ def scanbro(scanner, pipeline, output_name, clean=0, trim=False, dryrun=False):
     """
     Do the hard work of scanning to one or more files and processing
     these with any of the post-processing filters selected.
+
+    If clean == 0: no files are deleted,
+       clean == 1: intermediate files are deleted,
+       clean == 2: intermediate and input files are deleted,
+       clean == 3: scan is forced and all files are deleted.
+
+    If trim == True: last page of scan is deleted before pipeline.
+       This rule is not enforced if there are less than 4 pages in
+       the scan; there is no need and therefore the option is likely
+       erroneously specified.
+
+    If dryrun == True: commands are shown but not executed.
+       This only has limited success.
     """
-
-    def info(msg):
-        print(f"{Color.BOLD}:: {msg}{Color.END}")
-
-    def debug(msg):
-        if dryrun: print(f"{Color.GRAY} > { msg }{Color.END}")
-        else: print(f"{Color.RED}->{Color.GRAY} { msg }{Color.END}")
 
     def execute(who, input_file, output_file):
         cmd = who.command(input_file, output_file)
-        debug(' '.join(cmd))
+        Color.debug(' '.join(cmd), dryrun)
         if not dryrun:
             who.process(input_file, output_file)
 
+    def scan_once(output_file):
+        if scanner.is_adf():
+            output_file = with_presuffix(output_file, '%d')
+
+        # Scan image if file doesn't exist:
+        if not scanner.exists(output_file) or clean >= 3:
+            Color.info(f"Scan from {scanner.name}")
+            execute(scanner, None, output_file)
+        else:
+            # Only allow trim if we actually scanned!
+            trim = False
+        return scanner.output(output_file)
+
+
     # Get a handle on the output filenames:
     output_file = with_suffix(output_name, scanner.filetype)
-    if scanner.is_adf():
-        output_file = with_presuffix(output_file, '%d')
-
-    # Scan image if file doesn't exist:
-    if not scanner.exists(output_file) or clean >= 3:
-        info(f'Scan from {scanner.name}')
-        execute(scanner, None, output_file)
-    else:
-        # Only allow trim if we actually scanned!
-        trim = False
-    scanned_files = scanner.output(output_file)
+    scanned_files = scan_once(output_file)
 
     # Check that we actually have the files we claim.
     n = len(scanned_files)
@@ -537,16 +563,16 @@ def scanbro(scanner, pipeline, output_name, clean=0, trim=False, dryrun=False):
             raise Exception("trim expects at least 4 scan files")
         else:
             trim_file = scanned_files.pop()
-            info(f'Trim last scan file {trim_file}')
+            Color.info(f"Trim last scan file {trim_file}")
             os.remove(trim_file)
 
     # Print the filenames of the input files.
     if n == 1:
-        info(f'Read file {scanned_files[0]}')
+        Color.info(f"Read file {scanned_files[0]}")
     else:
-        info('Read files:')
+        Color.info("Read files:")
         for file in scanned_files:
-            print(f'   {file}')
+            print(f"   {file}")
 
     # Quit early if there are no stages in the pipeline.
     if len(pipeline) == 0:
@@ -563,12 +589,12 @@ def scanbro(scanner, pipeline, output_name, clean=0, trim=False, dryrun=False):
             assert(not p.multiple_out)
             part = input_files[0].rpartition('.1')
             output_files = [ p.suffix(part[0] + part[2]) ]
-            info(f'Transform [{input_files[0]} ...] => {prototype}')
+            Color.info(f'Transform [{input_files[0]} ...] => {prototype}')
             execute(p, input_files, output_files[0])
         else:
             output_files = []
             prototype = p.suffix(input_files[0])
-            info(f'Transform [{input_files[0]} ...] => [{prototype} ...]')
+            Color.info(f'Transform [{input_files[0]} ...] => [{prototype} ...]')
             for in_file in input_files:
                 out_file = p.suffix(in_file)
                 output_files.append(out_file)
@@ -577,7 +603,7 @@ def scanbro(scanner, pipeline, output_name, clean=0, trim=False, dryrun=False):
         # Remove intermediate files if requested
         if stage > 1 and clean > 0:
             for file in input_files:
-                debug(f'rm {file}')
+                Color.debug(f'rm {file}', dryrun)
                 if not dryrun: os.remove(file)
 
         # The output of this stage is the input for the next stage
@@ -589,14 +615,14 @@ def scanbro(scanner, pipeline, output_name, clean=0, trim=False, dryrun=False):
     for file in input_files:
         output_file = with_suffix(output_name, final_suffix)
         final_output.append(output_file)
-        debug(f'mv {file} {output_file}')
+        Color.debug(f'mv {file} {output_file}', dryrun)
         if not dryrun: shutil.move(file, output_file)
 
     # Removed scanned images, if they differ from the final output
     if clean >= 2 and final_output != scanned_files:
         for file in scanned_files:
             assert(file not in final_output)
-            debug(f'rm {file}')
+            Color.debug(f'rm {file}', dryrun)
             if not dryrun: os.remove(file)
 
     return final_output
@@ -812,19 +838,19 @@ if __name__ == "__main__":
         readline.set_completer(complete)
 
         while True:
-            name = input(':: Specify filename: ')
+            name = Color.input('Specify filename')
             if name == '':
-                print(f':: Leaving directory {tmpdir}')
+                Color.info(f'Leaving directory {tmpdir}')
                 break
             if len(output) == 1:
                 name = with_filepath(output[0], name)
                 if os.path.exists(name):
-                    print(f':: Error, file {name} already exists')
+                    Color.error(f'Error, file {name} already exists')
                     continue
                 shutil.move(output[0], name)
                 os.removedirs(tmpdir)
                 break
             else:
-                print(f':: Error, do not yet support moving multiple files')
-                print(f':: Leaving directory {tmpdir}')
+                Color.error(f'Error, do not yet support moving multiple files')
+                Color.info(f'Leaving directory {tmpdir}')
                 break

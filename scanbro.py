@@ -515,7 +515,7 @@ class Ghostscript(Processor):
         cmd = self.command(input_file, output_file)
         self.run_cmd(cmd, stdin, stdout)
 
-def scanbro(scanner, pipeline, output_name, clean=0, trim=False, dryrun=False):
+def scanbro(scanner, pipeline, output_name, clean=0, trim=False, batch=False, dryrun=False):
     """
     Do the hard work of scanning to one or more files and processing
     these with any of the post-processing filters selected.
@@ -529,6 +529,9 @@ def scanbro(scanner, pipeline, output_name, clean=0, trim=False, dryrun=False):
        This rule is not enforced if there are less than 4 pages in
        the scan; there is no need and therefore the option is likely
        erroneously specified.
+
+    If batch == True: scan is applied multiple times with interactive
+       input. Currently all options remain the same.
 
     If dryrun == True: commands are shown but not executed.
        This only has limited success.
@@ -556,7 +559,39 @@ def scanbro(scanner, pipeline, output_name, clean=0, trim=False, dryrun=False):
 
     # Get a handle on the output filenames:
     output_file = with_suffix(output_name, scanner.filetype)
-    scanned_files = scan_once(output_file)
+    scanned_files = []
+    if batch:
+        iteration = 0
+        while True:
+            iteration += 1
+            batch_file = with_presuffix(output_file, f"batch-{iteration}")
+            batch_output = scan_once(batch_file)
+            scanned_files.extend(batch_output)
+
+            # Provide a menu to the user to get next action
+            answer = None
+            while True:
+                answer = input_color("Select one of {source, papersize, continue, finish, abort}")
+                if answer == "":
+                    Color.error("Invalid choice, try again.")
+                elif "source".startswith(answer):
+                    scanner.config["source"] = Color.input(f"Select one of {scanner.sources.choices}", prefix="<<")
+                    continue
+                elif "papersize".startswith(answer):
+                    scanner.config["papersize"] = Color.input(f"Select one of {scanner.papersizes.choices}", prefix="<<")
+                    continue
+                elif "continue".startswith(answer):
+                    break
+                elif "finish".startswith(answer):
+                    break
+                elif "abort".startswith(answer):
+                    raise Exception("abort by user-request")
+                else:
+                    Color.error("Invalid choice, try again.")
+            if answer[0] == "f":
+                break
+    else:
+        scanned_files = scan_once(output_file)
 
     # Check that we actually have the files we claim.
     n = len(scanned_files)
@@ -726,6 +761,12 @@ if __name__ == "__main__":
         help='input scan mode, such as black&white or color',
     )
     parser.add_argument(
+        '-x', '--batch',
+        dest='batch',
+        action='store_true',
+        help='scan multiple times interactively',
+    )
+    parser.add_argument(
         '-t', '--trim-last',
         dest='trim',
         action='store_true',
@@ -825,6 +866,7 @@ if __name__ == "__main__":
         output,
         clean=args.clean,
         trim=args.trim,
+        batch=args.batch,
         dryrun=args.dryrun,
     )
 

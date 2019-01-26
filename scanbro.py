@@ -51,6 +51,10 @@ class Color:
         else: print(f"{Color.RED}->{Color.GRAY} { msg }{Color.END}")
 
     @staticmethod
+    def print(msg, prefix="--"):
+        print(f"{prefix}{msg}")
+
+    @staticmethod
     def info(msg, prefix="::"):
         print(f"{Color.BOLD}{prefix} {msg}{Color.END}")
 
@@ -190,7 +194,7 @@ class Processor:
             universal_newlines=True
         )
         if result.returncode != 0:
-            print("Error:")
+            Color.error("Error:")
             print(result.stderr)
             raise ChildProcessError()
 
@@ -200,9 +204,11 @@ class Processor:
     def command(self, input_file, output_file):
         return [self.binary]
 
-    def process(self, input_file, output_file, stdin=None, stdout=None):
+    def process(self, input_file, output_file, dryrun=False, stdin=None, stdout=None):
         cmd = self.command(input_file, output_file)
-        self.run_cmd(cmd, stdin, stdout)
+        Color.debug(" ".join(cmd), dryrun)
+        if not dryrun:
+            self.run_cmd(cmd, stdin, stdout)
 
 
 class Option:
@@ -303,14 +309,88 @@ class Scanner(Processor):
             cmd.extend(self.sources.args(self.config['source']))
         return cmd
 
-    def process(self, input_file, output_file):
+    def process(self, input_file, output_file, dryrun=False, stdin=None, stdout=None):
         self.assert_output_format(output_file)
-        cmd = self.command(input_file, output_file)
         if not self.is_adf():
-            with open(output_file, 'w') as file:
-                self.run_cmd(cmd, stdout=file)
+            cmd = self.command(input_file, output_file)
+            Color.debug(' '.join(cmd) + f' > {output_file}', dryrun)
+            if not dryrun:
+                with open(output_file, 'w') as file:
+                    self.run_cmd(cmd, stdout=file)
         else:
-            self.run_cmd(cmd)
+            Processor.process(self, input_file, output_file, dryrun, stdin, stdout)
+
+    def scan(self, output_file, clobber=False, trim=False, batch=False, dryrun=False):
+        def scan_once(output_file):
+            if scanner.is_adf():
+                output_file = with_presuffix(output_file, '%d')
+            # Scan image if file doesn't exist:
+            if not scanner.exists(output_file) or clobber:
+                Color.info(f"Scan from {scanner.name}")
+                scanner.process(None, output_file)
+            else:
+                # Only allow trim if we actually scanned!
+                trim = False
+            return scanner.output(output_file)
+
+        # Get a handle on the output filenames:
+        output_file = with_suffix(output_file, scanner.filetype)
+        scanned_files = []
+        if batch:
+            iteration = 0
+            while True:
+                iteration += 1
+                batch_file = with_presuffix(output_file, f"batch-{iteration}")
+                batch_output = scan_once(batch_file)
+                scanned_files.extend(batch_output)
+
+                # Provide a menu to the user to get next action
+                answer = None
+                while True:
+                    answer = Color.input("Select one of {source, papersize, continue, finish, abort}")
+                    if answer == "":
+                        Color.error("Invalid choice, try again.")
+                    elif "source".startswith(answer):
+                        scanner.config["source"] = Color.input(
+                            f"Select one of {scanner.sources.choices}", prefix="<<",
+                        )
+                        continue
+                    elif "papersize".startswith(answer):
+                        scanner.config["papersize"] = Color.input(
+                            f"Select one of {scanner.papersizes.choices}", prefix="<<",
+                        )
+                        continue
+                    elif "continue".startswith(answer):
+                        break
+                    elif "finish".startswith(answer):
+                        break
+                    elif "abort".startswith(answer):
+                        raise Exception("abort by user-request")
+                    else:
+                        Color.error("Invalid choice, try again.")
+                if answer[0] == "f":
+                    break
+        else:
+            scanned_files = scan_once(output_file)
+
+        # Check that we actually have the files we claim.
+        n = len(scanned_files)
+        if n == 0:
+            raise Exception("expected output files from scanner, found nothing")
+
+        # Trim the last page from the scanned files, if we did not
+        # scan in this run, trim will be set to false above.
+        if trim:
+            if n == 1:
+                raise Exception("cannot trim the only file scanned")
+            elif n < 4:
+                raise Exception("trim expects at least 4 scan files")
+            else:
+                trim_file = scanned_files.pop()
+                Color.info(f"Trim last scan file {trim_file}")
+                os.remove(trim_file)
+
+        return scanned_files
 
 
 class Brother_MFC_J5730DW(Scanner):
@@ -498,22 +578,24 @@ class Ghostscript(Processor):
         cmd.extend(input_files)
         return cmd
 
-    def process(self, input_file, output_file, stdin=None, stdout=None):
+    def process(self, input_file, output_file, dryrun=False, stdin=None, stdout=None):
         if self.benchmark:
-            print('Ghostscript benchmark requested.')
-            print('--------------------------------')
+            Color.print('Ghostscript benchmark requested.')
+            Color.print('--------------------------------')
             original_profile = self.profile
             for profile in self.profiles.choices:
                 self.profile = profile
                 profile_output = with_presuffix(output_file, profile)
-                print(f'Create {profile_output}')
+                Color.print(f'Create {profile_output}')
                 cmd = self.command(input_file, profile_output)
-                self.run_cmd(cmd, None, None)
-            print('--------------------------------')
+                Color.debug(' '.join(cmd), dryrun)
+                if not dryrun:
+                    self.run_cmd(cmd, None, None)
+            Color.print('--------------------------------')
             self.profile = original_profile
+        else:
+            Processor.process(self, input_file, output_file, dryrun, stdin, stdout)
 
-        cmd = self.command(input_file, output_file)
-        self.run_cmd(cmd, stdin, stdout)
 
 def scanbro(scanner, pipeline, output_name, clean=0, trim=False, batch=False, dryrun=False):
     """
@@ -530,88 +612,22 @@ def scanbro(scanner, pipeline, output_name, clean=0, trim=False, batch=False, dr
        the scan; there is no need and therefore the option is likely
        erroneously specified.
 
-    If batch == True: scan is applied multiple times with interactive
-       input. Currently all options remain the same.
+    If batch == True: interactively scan multiple times.
 
     If dryrun == True: commands are shown but not executed.
-       This only has limited success.
     """
 
-    def execute(who, input_file, output_file):
-        cmd = who.command(input_file, output_file)
-        Color.debug(' '.join(cmd), dryrun)
-        if not dryrun:
-            who.process(input_file, output_file)
-
-    def scan_once(output_file):
-        if scanner.is_adf():
-            output_file = with_presuffix(output_file, '%d')
-
-        # Scan image if file doesn't exist:
-        if not scanner.exists(output_file) or clean >= 3:
-            Color.info(f"Scan from {scanner.name}")
-            execute(scanner, None, output_file)
-        else:
-            # Only allow trim if we actually scanned!
-            trim = False
-        return scanner.output(output_file)
-
-
-    # Get a handle on the output filenames:
-    output_file = with_suffix(output_name, scanner.filetype)
-    scanned_files = []
-    if batch:
-        iteration = 0
-        while True:
-            iteration += 1
-            batch_file = with_presuffix(output_file, f"batch-{iteration}")
-            batch_output = scan_once(batch_file)
-            scanned_files.extend(batch_output)
-
-            # Provide a menu to the user to get next action
-            answer = None
-            while True:
-                answer = input_color("Select one of {source, papersize, continue, finish, abort}")
-                if answer == "":
-                    Color.error("Invalid choice, try again.")
-                elif "source".startswith(answer):
-                    scanner.config["source"] = Color.input(f"Select one of {scanner.sources.choices}", prefix="<<")
-                    continue
-                elif "papersize".startswith(answer):
-                    scanner.config["papersize"] = Color.input(f"Select one of {scanner.papersizes.choices}", prefix="<<")
-                    continue
-                elif "continue".startswith(answer):
-                    break
-                elif "finish".startswith(answer):
-                    break
-                elif "abort".startswith(answer):
-                    raise Exception("abort by user-request")
-                else:
-                    Color.error("Invalid choice, try again.")
-            if answer[0] == "f":
-                break
-    else:
-        scanned_files = scan_once(output_file)
-
-    # Check that we actually have the files we claim.
-    n = len(scanned_files)
-    if n == 0:
-        raise Exception("expected output files from scanner, found nothing")
-
-    # Trim the last page from the scanned files, if we did not
-    # scan in this run, trim will be set to false above.
-    if trim:
-        if n == 1:
-            raise Exception("cannot trim the only file scanned")
-        elif n < 4:
-            raise Exception("trim expects at least 4 scan files")
-        else:
-            trim_file = scanned_files.pop()
-            Color.info(f"Trim last scan file {trim_file}")
-            os.remove(trim_file)
+    # Scan/read
+    scanned_files = scanner.scan(
+        output_name,
+        clobber=(True if clean >= 3 else False),
+        trim=trim,
+        batch=batch,
+        dryrun=dryrun,
+    )
 
     # Print the filenames of the input files.
-    if n == 1:
+    if len(scanned_files) == 1:
         Color.info(f"Read file {scanned_files[0]}")
     else:
         Color.info("Read files:")
@@ -634,7 +650,7 @@ def scanbro(scanner, pipeline, output_name, clean=0, trim=False, batch=False, dr
             part = input_files[0].rpartition('.1')
             output_files = [ p.suffix(part[0] + part[2]) ]
             Color.info(f'Transform [{input_files[0]} ...] => {prototype}')
-            execute(p, input_files, output_files[0])
+            p.process(input_files, output_files[0], dryrun)
         else:
             output_files = []
             prototype = p.suffix(input_files[0])
@@ -642,7 +658,7 @@ def scanbro(scanner, pipeline, output_name, clean=0, trim=False, batch=False, dr
             for in_file in input_files:
                 out_file = p.suffix(in_file)
                 output_files.append(out_file)
-                execute(p, in_file, out_file)
+                p.process(in_file, out_file, dryrun)
 
         # Remove intermediate files if requested
         if stage > 1 and clean > 0:
@@ -670,6 +686,36 @@ def scanbro(scanner, pipeline, output_name, clean=0, trim=False, batch=False, dr
             if not dryrun: os.remove(file)
 
     return final_output
+
+
+def name_final_output(tmpdir, filepath):
+    # Set up <TAB> completion
+    import readline, glob
+    def complete(text, state):
+        return (glob.glob(text+'*')+[None])[state]
+    readline.set_completer_delims(' \t\n;')
+    readline.parse_and_bind("tab: complete")
+    readline.set_completer(complete)
+
+    # Keep trying to get a filename from the user until
+    # they give us an answer we can work with.
+    while True:
+        name = Color.input('Specify filename')
+        if name == '':
+            Color.info(f'Leaving directory {tmpdir}')
+            break
+        if len(output) == 1:
+            name = with_filepath(output[0], name)
+            if os.path.exists(name):
+                Color.error(f'Error, file {name} already exists')
+                continue
+            shutil.move(output[0], name)
+            os.removedirs(tmpdir)
+            break
+        else:
+            Color.error(f'Error, do not yet support moving multiple files')
+            Color.info(f'Leaving directory {tmpdir}')
+            break
 
 
 if __name__ == "__main__":
@@ -879,29 +925,4 @@ if __name__ == "__main__":
     # directory.
     if args.output is None:
         assert(tmpdir is not None)
-
-        # Set up <TAB> completion
-        import readline, glob
-        def complete(text, state):
-            return (glob.glob(text+'*')+[None])[state]
-        readline.set_completer_delims(' \t\n;')
-        readline.parse_and_bind("tab: complete")
-        readline.set_completer(complete)
-
-        while True:
-            name = Color.input('Specify filename')
-            if name == '':
-                Color.info(f'Leaving directory {tmpdir}')
-                break
-            if len(output) == 1:
-                name = with_filepath(output[0], name)
-                if os.path.exists(name):
-                    Color.error(f'Error, file {name} already exists')
-                    continue
-                shutil.move(output[0], name)
-                os.removedirs(tmpdir)
-                break
-            else:
-                Color.error(f'Error, do not yet support moving multiple files')
-                Color.info(f'Leaving directory {tmpdir}')
-                break
+        name_final_output(tmpdir, output[0])

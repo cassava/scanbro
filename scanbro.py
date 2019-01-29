@@ -579,7 +579,10 @@ class Ghostscript(Processor):
             f'-sOutputFile={output_file}',
         ]
         cmd.extend(self.profiles.args(self.profile))
-        cmd.extend(input_files)
+        if self.multiple_in:
+            cmd.extend(input_files)
+        else:
+            cmd.append(input_files)
         return cmd
 
     def process(self, input_file, output_file, dryrun=False, stdin=None, stdout=None):
@@ -673,14 +676,23 @@ def scanbro(scanner, pipeline, output_name, clean=0, trim=False, batch=False, dr
         # The output of this stage is the input for the next stage
         input_files = output_files
 
-    # Remove the stage prefix from the output files,
+    # Remove the stage prefix from the output files
     final_suffix = pipeline[-1].filetype
     final_output = []
-    for file in input_files:
-        output_file = with_suffix(output_name, final_suffix)
+    def move_file(file, output_file):
         final_output.append(output_file)
         Color.debug(f'mv {file} {output_file}', dryrun)
         if not dryrun: shutil.move(file, output_file)
+    if len(input_files) == 1:
+        # If we only have one file, we don't add an index
+        output_file = with_suffix(output_name, final_suffix)
+        move_file(input_files[0], output_file)
+    else:
+        index = 0
+        for file in input_files:
+            index += 1
+            output_file = with_suffix(output_name, f'{index}.' + final_suffix)
+            move_file(file, output_file)
 
     # Removed scanned images, if they differ from the final output
     if clean >= 2 and final_output != scanned_files:
@@ -692,7 +704,15 @@ def scanbro(scanner, pipeline, output_name, clean=0, trim=False, batch=False, dr
     return final_output
 
 
-def name_final_output(tmpdir, filepath):
+def show_file(filepath):
+    viewer = 'exo-open'
+    if has_suffix(filepath, 'pdf'):
+        viewer = 'evince'
+    Color.debug(f'{viewer} {filepath}')
+    return subprocess.Popen([viewer, filepath], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def name_files_interactively(filepaths, verify=True):
     # Set up <TAB> completion
     import readline, glob
     def complete(text, state):
@@ -703,23 +723,28 @@ def name_final_output(tmpdir, filepath):
 
     # Keep trying to get a filename from the user until
     # they give us an answer we can work with.
-    while True:
-        name = Color.input('Specify filename')
-        if name == '':
-            Color.info(f'Leaving directory {tmpdir}')
-            break
-        if len(output) == 1:
-            name = with_filepath(output[0], name)
+    named = 0
+    for file in filepaths:
+        process = None
+        while True:
+            if verify:
+                process = show_file(file)
+
+            name = Color.input('Specify filename')
+            if name == '':
+                Color.info(f'Leaving file: {file}')
+                break
+            name = with_filepath(file, name)
             if os.path.exists(name):
                 Color.error(f'Error, file {name} already exists')
                 continue
-            shutil.move(output[0], name)
-            os.removedirs(tmpdir)
+            named += 1
+            Color.debug(f'mv {file} {name}')
+            shutil.move(file, name)
             break
-        else:
-            Color.error(f'Error, do not yet support moving multiple files')
-            Color.info(f'Leaving directory {tmpdir}')
-            break
+        if process is not None:
+            process.terminate()
+    return named
 
 
 if __name__ == "__main__":
@@ -817,6 +842,12 @@ if __name__ == "__main__":
         help='scan multiple times interactively',
     )
     parser.add_argument(
+        '-z', '--separate',
+        dest='separate',
+        action='store_true',
+        help='save each scanned file separately',
+    )
+    parser.add_argument(
         '-t', '--trim-last',
         dest='trim',
         action='store_true',
@@ -831,7 +862,10 @@ if __name__ == "__main__":
     def make_tesseract(args):
         return Tesseract(args.language)
     def make_ghostscript(args):
-        return Ghostscript(args.gs_profile, args.gs_benchmark)
+        gs = Ghostscript(args.gs_profile, args.gs_benchmark)
+        if args.separate:
+            gs.multiple_in = False
+        return gs
 
     FILTERS = {
         'imagemagick': make_imagemagick,
@@ -905,9 +939,18 @@ if __name__ == "__main__":
     # a temporary directory and prompt the user to specify the name afterwards.
     tmpdir = None
     output = args.output
-    if args.output is None:
+
+    if args.output is None and not args.dryrun:
         tmpdir = tempfile.mkdtemp(prefix='scanbro-')
         output = tmpdir + '/scan'
+    elif os.path.isdir(args.output):
+        if args.output.startswith('/tmp/scanbro-'):
+            tmpdir = args.output
+            output = tmpdir + '/scan'
+        else:
+            raise Exception('expect output to be a file')
+    if tmpdir is not None:
+        Color.info(f'Using temporary directory: {tmpdir}')
 
     # Do the real work :-D
     output = scanbro(
@@ -920,13 +963,24 @@ if __name__ == "__main__":
         dryrun=args.dryrun,
     )
 
-    assert(len(output) != 0)
-    if args.verify:
-        subprocess.Popen(['exo-open', output[0]], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    # Quit early if we are in dryrun mode because the next section requires
+    # us to actually have created files.
+    if args.dryrun:
+        sys.exit(1)
 
     # If we created a temporary directory, we need to move the final file from
     # there, by getting a name from the user. Then we delete the temporary
     # directory.
-    if args.output is None:
-        assert(tmpdir is not None)
-        name_final_output(tmpdir, output[0])
+    assert(len(output) != 0)
+    if tmpdir is not None:
+        moved = name_files_interactively(output, args.verify)
+        if args.clean >= 2 and moved == len(output):
+            Color.debug(f'rm -r {tmpdir}')
+            os.removedirs(tmpdir)
+        else:
+            Color.info(f'Leaving directory: {tmpdir}')
+    elif args.verify:
+        for file in output:
+            process = show_file(file)
+            Color.input('Press <Enter> for next or <Ctrl+C> to quit', suffix='.')
+            process.terminate()

@@ -930,6 +930,8 @@ if __name__ == "__main__":
         # We need to convert from PNM to PNG. The default options for
         # ImageMagick should result in a lossless conversion.
         args.filters.append('imagemagick')
+    if args.separate and args.trim:
+        raise Exception('cannot specify --separate and --trim simultaneously')
 
     # Create scanner and pipeline. The order is not customizable.
     scanner = make_scanner(args)

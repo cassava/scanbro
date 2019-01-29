@@ -26,10 +26,11 @@
 # at some of the recipes here: https://jon.dehdari.org/tutorials/pdf_tricks.html
 
 import argparse
-import subprocess
 import os
 import pathlib
 import shutil
+import subprocess
+import sys
 import tempfile
 
 class Color:
@@ -47,8 +48,8 @@ class Color:
 
     @staticmethod
     def debug(msg, dim=False):
-        if dim: print(f"{Color.GRAY} > { msg }{Color.END}")
-        else: print(f"{Color.RED}->{Color.GRAY} { msg }{Color.END}")
+        if dim: print(f"{Color.GRAY} > {msg}{Color.END}")
+        else: print(f"{Color.RED}->{Color.GRAY} {msg}{Color.END}")
 
     @staticmethod
     def print(msg, prefix="--"):
@@ -60,11 +61,11 @@ class Color:
 
     @staticmethod
     def error(msg, prefix="##"):
-        print(f"{Color.RED}{prefix}{Color.END} { msg}")
+        print(f"{Color.RED}{prefix}{Color.END} {msg}")
 
     @staticmethod
-    def input(msg, prefix="<-"):
-        return input(f"{Color.GREEN}{prefix}{Color.END} { msg }: ")
+    def input(msg, prefix="<-", suffix=": "):
+        return input(f"{Color.GREEN}{prefix}{Color.END} {msg}{suffix}")
 
 class Geometry:
     """Represents a geometry in millimeters that can be scanned."""
@@ -459,6 +460,9 @@ class Tesseract(Processor):
             output_file = output_file[:-(len(self.filetype)+1)]
         cmd = [self.binary, input_file, output_file]
         cmd.extend(['-l', self.language])
+        # Set the algorithm to just use neural nets.
+        # Default is to use two algorithms (2) but that segfaults sometimes.
+        cmd.extend(['--oem', '1']) 
         cmd.extend([self.filetype])
         return cmd
 

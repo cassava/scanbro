@@ -179,6 +179,7 @@ def with_filepath(filename, name):
 class Processor:
     binary = "false"
     multiple_in = False
+    multiple_of = None
     multiple_out = False
 
     def __init__(self):
@@ -262,6 +263,9 @@ class Scanner(Processor):
 
     def is_adf(self):
         return not ('source' in self.config and self.config['source'] == 'flatbed')
+
+    def is_duplex(self):
+        return ('source' in self.config and self.config['source'] in self.duplex_sources)
 
     def assert_output_format(self, prototype):
         retval = prototype.find('%d')
@@ -426,8 +430,9 @@ class Brother_MFC_J5730DW(Scanner):
         'adf-left':          ['--source', 'Automatic Document Feeder(left aligned)'],
         'adf-left-duplex':   ['--source', 'Automatic Document Feeder(left aligned,Duplex)'],
         'adf-center':        ['--source', 'Automatic Document Feeder(centrally aligned)'],
-        'adf-center_duplex': ['--source', 'Automatic Document Feeder(centrally aligned,Duplex)'],
+        'adf-center-duplex': ['--source', 'Automatic Document Feeder(centrally aligned,Duplex)'],
     })
+    duplex_sources = ['duplex', 'adf-left-duplex', 'adf-center-duplex']
 
 
 class Unpaper(Processor):
@@ -651,13 +656,30 @@ def scanbro(scanner, pipeline, output_name, clean=0, trim=False, batch=False, dr
     for p in pipeline:
         stage += 1
         if p.multiple_in:
-            # Currently, only the scanner can create multiple output files,
-            # so we assume that multiple in means single out.
-            assert(not p.multiple_out)
-            part = input_files[0].rpartition('.1')
-            output_files = [ p.suffix(part[0] + part[2]) ]
-            Color.info(f'Transform [{input_files[0]} ...] => {prototype}')
-            p.process(input_files, output_files[0], dryrun)
+            if p.multiple_of is None:
+                # Currently, only the scanner can create multiple output files,
+                # so we assume that multiple in means single out.
+                assert(not p.multiple_out)
+                part = input_files[0].rpartition('.1')
+                output_files = [ p.suffix(part[0] + part[2]) ]
+                Color.info(f'Transform [{input_files[0]} ...] => {prototype}')
+                p.process(input_files, output_files[0], dryrun)
+            else:
+                # In this case, we will be creating multiple_out even if it's
+                # not explicitely specified. Instead, we will be partitioning
+                # the input files in multiples and converting these into
+                # output.
+                output_files = []
+                prototype = p.suffix(input_files[0])
+                n = len(input_files)
+                if n % p.multiple_of != 0:
+                    raise Exception(f'input files {n} cannot be cleanly partitioned in {p.multiple_of}')
+                Color.info(f'Transform by {p.multiple_of}s [{input_files[0]} ...] => [{prototype} ...]')
+                partitioned_files = [input_files[i:i + p.multiple_of] for i in range(0, n, p.multiple_of)]
+                for in_files in partitioned_files:
+                    out_file = p.suffix(in_files[0])
+                    output_files.append(out_file)
+                    p.process(in_files, out_file, dryrun)
         else:
             output_files = []
             prototype = p.suffix(input_files[0])
@@ -855,16 +877,19 @@ if __name__ == "__main__":
     )
 
     # Post-processing options:
-    def make_unpaper(args):
+    def make_unpaper(scanner, args):
         return Unpaper()
-    def make_imagemagick(args):
+    def make_imagemagick(scanner, args):
         return ImageMagick(args.im_profile, args.convert_quality)
-    def make_tesseract(args):
+    def make_tesseract(scanner, args):
         return Tesseract(args.language)
-    def make_ghostscript(args):
+    def make_ghostscript(scanner, args):
         gs = Ghostscript(args.gs_profile, args.gs_benchmark)
         if args.separate:
-            gs.multiple_in = False
+            if scanner.is_duplex():
+                gs.multiple_of = 2
+            else:
+                gs.multiple_in = False
         return gs
 
     FILTERS = {
@@ -935,7 +960,7 @@ if __name__ == "__main__":
 
     # Create scanner and pipeline. The order is not customizable.
     scanner = make_scanner(args)
-    pipeline = [ FILTERS[f](args) for f in FILTERS if f in args.filters ]
+    pipeline = [ FILTERS[f](scanner, args) for f in FILTERS if f in args.filters ]
 
     # If the user did not specify a filename, we put the output files in
     # a temporary directory and prompt the user to specify the name afterwards.

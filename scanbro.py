@@ -748,10 +748,9 @@ def name_files_interactively(filepaths, verify=True):
     named = 0
     for file in filepaths:
         process = None
+        if verify:
+            process = show_file(file)
         while True:
-            if verify:
-                process = show_file(file)
-
             name = Color.input('Specify filename')
             if name == '':
                 Color.info(f'Leaving file: {file}')

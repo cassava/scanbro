@@ -156,6 +156,10 @@ PAPERSIZES = {
     "letter":   Papersize(216, 279),
     "ltr":      Papersize(216, 279),
     "tabloid":  Papersize(279, 432),
+
+    # Assorted documents:
+    "fahrzeugschein": Papersize(210, 105),
+    "kreditkarte":    Papersize(85.60, 53.98),  # ISO/IEC 7810 ID-1
 }
 
 

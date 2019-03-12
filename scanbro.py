@@ -186,8 +186,7 @@ def with_filepath(filename, name):
 
 class Processor:
     binary = "false"
-    multiple_in = False
-    multiple_of = None
+    multiple_in = 1
     multiple_out = False
 
     def __init__(self):
@@ -211,11 +210,14 @@ class Processor:
     def suffix(self, file):
         return with_suffix(file, self.binary + '.' + self.filetype)
 
-    def command(self, input_file, output_file):
-        return [self.binary]
+    def command(self, input_files, output_file):
+        assert(type(input_files) is list and len(input_files) > 0)
+        assert(self.multiple_in == 1)
+        return [self.binary, input_files[0], output_file]
 
-    def process(self, input_file, output_file, dryrun=False, stdin=None, stdout=None):
-        cmd = self.command(input_file, output_file)
+    def process(self, input_files, output_file, dryrun=False, stdin=None, stdout=None):
+        assert(type(input_files) is list and len(input_files) > 0)
+        cmd = self.command(input_files, output_file)
         Color.debug(" ".join(cmd), dryrun)
         if not dryrun:
             self.run_cmd(cmd, stdin, stdout)
@@ -301,13 +303,14 @@ class Scanner(Processor):
         else:
             return [prototype] if os.path.exists(prototype) else []
 
-    def command(self, input_file, output_file):
+    def command(self, input_device, output_file):
+        assert(input_device is None or type(input_device) is str)
         self.assert_output_format(output_file)
-        if input_file is None:
-            input_file = self.device
+        if input_device is None:
+            input_device = self.device
         cmd = [
             self.binary,
-            '--device-name', input_file,
+            '--device-name', input_device,
             '--format', self.filetype,
         ]
         if self.is_adf():
@@ -322,16 +325,20 @@ class Scanner(Processor):
             cmd.extend(self.sources.args(self.config['source']))
         return cmd
 
-    def process(self, input_file, output_file, dryrun=False, stdin=None, stdout=None):
+    def process(self, input_device, output_file, dryrun=False, stdin=None, stdout=None):
+        assert(input_device is None or type(input_device) is str)
         self.assert_output_format(output_file)
         if not self.is_adf():
-            cmd = self.command(input_file, output_file)
+            cmd = self.command(input_device, output_file)
             Color.debug(' '.join(cmd) + f' > {output_file}', dryrun)
             if not dryrun:
                 with open(output_file, 'w') as file:
                     self.run_cmd(cmd, stdout=file)
         else:
-            Processor.process(self, input_file, output_file, dryrun, stdin, stdout)
+            cmd = self.command(input_device, output_file)
+            Color.debug(" ".join(cmd), dryrun)
+            if not dryrun:
+                self.run_cmd(cmd, stdin, stdout)
 
     def scan(self, output_file, clobber=False, trim=False, batch=False, dryrun=False):
         def scan_once(output_file):
@@ -365,12 +372,12 @@ class Scanner(Processor):
                         Color.error("Invalid choice, try again.")
                     elif "source".startswith(answer):
                         scanner.config["source"] = Color.input(
-                            f"Select one of {scanner.sources.choices}", prefix="<<",
+                            f"Select one of {scanner.sources.choices.keys()}", prefix="<<",
                         )
                         continue
                     elif "papersize".startswith(answer):
                         scanner.config["papersize"] = Color.input(
-                            f"Select one of {scanner.papersizes.choices}", prefix="<<",
+                            f"Select one of {scanner.papersizes.choices.keys()}", prefix="<<",
                         )
                         continue
                     elif "continue".startswith(answer):
@@ -433,8 +440,8 @@ class Brother_MFC_J5730DW(Scanner):
     sources = Option('auto', {
         'auto':              [],
         'flatbed':           ['--source', 'FlatBed'],
-        'adf':               ['--source', 'Automatic Document Feeder(left aligned)'],
-        'duplex':            ['--source', 'Automatic Document Feeder(left aligned,Duplex)'],
+        'adf':               ['--source', 'Automatic Document Feeder(centrally aligned)'],
+        'duplex':            ['--source', 'Automatic Document Feeder(centrally aligned,Duplex)'],
         'adf-left':          ['--source', 'Automatic Document Feeder(left aligned)'],
         'adf-left-duplex':   ['--source', 'Automatic Document Feeder(left aligned,Duplex)'],
         'adf-center':        ['--source', 'Automatic Document Feeder(centrally aligned)'],
@@ -449,7 +456,9 @@ class Unpaper(Processor):
     binary = 'unpaper'
     filetype = 'pnm'
 
-    def command(self, input_file, output_file):
+    def command(self, input_files, output_file):
+        assert(type(input_files) is list and len(input_files) == 1)
+        input_file = input_files[0]
         cmd = [
             self.binary,
             input_file,
@@ -468,7 +477,9 @@ class Tesseract(Processor):
         Processor.__init__(self)
         self.language = language
 
-    def command(self, input_file, output_file):
+    def command(self, input_files, output_file):
+        assert(type(input_files) is list and len(input_files) == 1)
+        input_file = input_files[0]
         if has_suffix(output_file, self.filetype):
             output_file = output_file[:-(len(self.filetype)+1)]
         cmd = [self.binary, input_file, output_file]
@@ -510,7 +521,9 @@ class ImageMagick(Processor):
         self.profile = profile
         self.quality = quality
 
-    def command(self, input_file, output_file):
+    def command(self, input_files, output_file):
+        assert(type(input_files) is list and len(input_files) == 1)
+        input_file = input_files[0]
         if input_file == output_file:
             raise Exception(f"input {input_file} and output {output_file} are the same")
         cmd = [self.binary, input_file]
@@ -531,7 +544,7 @@ class Ghostscript(Processor):
 
     binary = 'gs'
     filetype = 'pdf'
-    multiple_in = True
+    multiple_in = 0
     profiles = Option('high', {
         # Default profiles:
         # 'default':  ['-dPDFSETTINGS=/default'],
@@ -581,6 +594,7 @@ class Ghostscript(Processor):
         self.benchmark = benchmark
 
     def command(self, input_files, output_file):
+        assert(type(input_files) is list and len(input_files) > 0)
         cmd = [
             self.binary,
             '-dNOPAUSE',
@@ -592,13 +606,11 @@ class Ghostscript(Processor):
             f'-sOutputFile={output_file}',
         ]
         cmd.extend(self.profiles.args(self.profile))
-        if self.multiple_in:
-            cmd.extend(input_files)
-        else:
-            cmd.append(input_files)
+        cmd.extend(input_files)
         return cmd
 
-    def process(self, input_file, output_file, dryrun=False, stdin=None, stdout=None):
+    def process(self, input_files, output_file, dryrun=False, stdin=None, stdout=None):
+        assert(type(input_files) is list and len(input_files) > 0)
         if self.benchmark:
             Color.print('Ghostscript benchmark requested.')
             Color.print('--------------------------------')
@@ -607,14 +619,14 @@ class Ghostscript(Processor):
                 self.profile = profile
                 profile_output = with_presuffix(output_file, profile)
                 Color.print(f'Create {profile_output}')
-                cmd = self.command(input_file, profile_output)
+                cmd = self.command(input_files, profile_output)
                 Color.debug(' '.join(cmd), dryrun)
                 if not dryrun:
                     self.run_cmd(cmd, None, None)
             Color.print('--------------------------------')
             self.profile = original_profile
         else:
-            Processor.process(self, input_file, output_file, dryrun, stdin, stdout)
+            Processor.process(self, input_files, output_file, dryrun, stdin, stdout)
 
 
 def scanbro(scanner, pipeline, output_name, clean=0, trim=False, batch=False, dryrun=False):
@@ -663,39 +675,30 @@ def scanbro(scanner, pipeline, output_name, clean=0, trim=False, batch=False, dr
     input_files = scanned_files
     for p in pipeline:
         stage += 1
-        if p.multiple_in:
-            if p.multiple_of is None:
-                # Currently, only the scanner can create multiple output files,
-                # so we assume that multiple in means single out.
-                assert(not p.multiple_out)
-                part = input_files[0].rpartition('.1')
-                output_files = [ p.suffix(part[0] + part[2]) ]
-                Color.info(f'Transform [{input_files[0]} ...] => {prototype}')
-                p.process(input_files, output_files[0], dryrun)
-            else:
-                # In this case, we will be creating multiple_out even if it's
-                # not explicitely specified. Instead, we will be partitioning
-                # the input files in multiples and converting these into
-                # output.
-                output_files = []
-                prototype = p.suffix(input_files[0])
-                n = len(input_files)
-                if n % p.multiple_of != 0:
-                    raise Exception(f'input files {n} cannot be cleanly partitioned in {p.multiple_of}')
-                Color.info(f'Transform by {p.multiple_of}s [{input_files[0]} ...] => [{prototype} ...]')
-                partitioned_files = [input_files[i:i + p.multiple_of] for i in range(0, n, p.multiple_of)]
-                for in_files in partitioned_files:
-                    out_file = p.suffix(in_files[0])
-                    output_files.append(out_file)
-                    p.process(in_files, out_file, dryrun)
+        if p.multiple_in <= 0:
+            # Currently, only the scanner can create multiple output files,
+            # so we assume that multiple in means single out.
+            assert(not p.multiple_out)
+            part = input_files[0].rpartition('.1')
+            output_files = [ p.suffix(part[0] + part[2]) ]
+            Color.info(f'Transform [{input_files[0]} ...] => {prototype}')
+            p.process(input_files, output_files[0], dryrun)
         else:
+            # In this case, we will be creating multiple_out even if it's
+            # not explicitely specified. Instead, we will be partitioning
+            # the input files in multiples and converting these into
+            # output.
             output_files = []
             prototype = p.suffix(input_files[0])
-            Color.info(f'Transform [{input_files[0]} ...] => [{prototype} ...]')
-            for in_file in input_files:
-                out_file = p.suffix(in_file)
+            n = len(input_files)
+            if n % p.multiple_in != 0:
+                raise Exception(f'input files {n} cannot be cleanly partitioned in {p.multiple_in}')
+            Color.info(f'Transform /{p.multiple_in} [{input_files[0]} ...] => [{prototype} ...]')
+            partitioned_files = [input_files[i:i + p.multiple_in] for i in range(0, n, p.multiple_in)]
+            for in_files in partitioned_files:
+                out_file = p.suffix(in_files[0])
                 output_files.append(out_file)
-                p.process(in_file, out_file, dryrun)
+                p.process(in_files, out_file, dryrun)
 
         # Remove intermediate files if requested
         if stage > 1 and clean > 0:
@@ -871,10 +874,11 @@ if __name__ == "__main__":
         help='scan multiple times interactively',
     )
     parser.add_argument(
-        '-z', '--separate',
-        dest='separate',
-        action='store_true',
-        help='save each scanned file separately',
+        '-z', '--group-by',
+        dest='group_by',
+        type=int,
+        default=0,
+        help='group input files by N and save separately',
     )
     parser.add_argument(
         '-t', '--trim-last',
@@ -892,11 +896,10 @@ if __name__ == "__main__":
         return Tesseract(args.language)
     def make_ghostscript(scanner, args):
         gs = Ghostscript(args.gs_profile, args.gs_benchmark)
-        if args.separate:
-            if scanner.is_duplex():
-                gs.multiple_of = 2
-            else:
-                gs.multiple_in = False
+        if args.group_by != 0:
+            gs.multiple_in = args.group_by;
+            if args.group_by % 2 == 1 and scanner.is_duplex():
+                raise Exception('duplex scanning requires group-by to be an even number');
         return gs
 
     FILTERS = {
@@ -962,8 +965,8 @@ if __name__ == "__main__":
         # We need to convert from PNM to PNG. The default options for
         # ImageMagick should result in a lossless conversion.
         args.filters.append('imagemagick')
-    if args.separate and args.trim:
-        raise Exception('cannot specify --separate and --trim simultaneously')
+    if args.group_by != 0 and args.trim:
+        raise Exception('cannot specify --group-by and --trim simultaneously')
 
     # Create scanner and pipeline. The order is not customizable.
     scanner = make_scanner(args)

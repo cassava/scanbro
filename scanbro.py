@@ -160,6 +160,10 @@ PAPERSIZES = {
     # Assorted documents:
     "fahrzeugschein": Papersize(210, 105),
     "kreditkarte":    Papersize(85.60, 53.98),  # ISO/IEC 7810 ID-1
+
+    # Receipts
+    "receipt-80": Papersize(80, 300),
+    "receipt-60": Papersize(60, 250),
 }
 
 

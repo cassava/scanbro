@@ -340,7 +340,8 @@ class Scanner(Processor):
             if not dryrun:
                 self.run_cmd(cmd, stdin, stdout)
 
-    def scan(self, output_file, clobber=False, trim=False, batch=False, dryrun=False):
+    def scan(self, output_file, clobber=False, exclude=[], interactive=False, dryrun=False):
+        delete_excludes = True
         def scan_once(output_file):
             if scanner.is_adf():
                 output_file = with_presuffix(output_file, '%d')
@@ -349,14 +350,14 @@ class Scanner(Processor):
                 Color.info(f"Scan from {scanner.name}")
                 scanner.process(None, output_file)
             else:
-                # Only allow trim if we actually scanned!
-                trim = False
+                # Only delete excluded files if we actually scanned!
+                delete_excludes = False
             return scanner.output(output_file)
 
         # Get a handle on the output filenames:
         output_file = with_suffix(output_file, scanner.filetype)
         scanned_files = []
-        if batch:
+        if interactive:
             iteration = 0
             while True:
                 iteration += 1
@@ -398,17 +399,33 @@ class Scanner(Processor):
         if n == 0:
             raise Exception("expected output files from scanner, found nothing")
 
-        # Trim the last page from the scanned files, if we did not
-        # scan in this run, trim will be set to false above.
-        if trim:
+        # Exclude select pages from the scanned files, if we did not
+        # scan in this run, delete will be set to false above.
+        #
+        # If the exclude indices are incorrect in any way, an exception will
+        # be raised. The files will not be deleted, so the user can use the
+        # cached files to try again.
+        if len(exclude) > 0:
             if n == 1:
-                raise Exception("cannot trim the only file scanned")
+                raise Exception("cannot exclude the only file scanned")
             elif n < 4:
-                raise Exception("trim expects at least 4 scan files")
+                raise Exception("exclude expects at least 4 scan files")
             else:
-                trim_file = scanned_files.pop()
-                Color.info(f"Trim last scan file {trim_file}")
-                os.remove(trim_file)
+                Color.info(f"Exclude files {', '.join([str(i) for i in exclude])}")
+                try:
+                    excluded_files = [scanned_files[i] for i in exclude]
+                except IndexError:
+                    raise Exception("exclude indexes do not match available range")
+
+                # Make sure there are no duplicate entries.
+                if len(uniq(excluded_files)) != len(excluded_files):
+                    raise Exception("exclude entries must not be duplicates")
+
+                scanned_files = [f for f in scanned_files if f not in excluded_files]
+                if delete_excludes:
+                    for file in excluded_files:
+                        Color.debug(f"rm {file}")
+                        os.remove(file)
 
         return scanned_files
 
@@ -486,7 +503,7 @@ class Tesseract(Processor):
         cmd.extend(['-l', self.language])
         # Set the algorithm to just use neural nets.
         # Default is to use two algorithms (2) but that segfaults sometimes.
-        cmd.extend(['--oem', '1']) 
+        cmd.extend(['--oem', '1'])
         cmd.extend([self.filetype])
         return cmd
 
@@ -629,7 +646,7 @@ class Ghostscript(Processor):
             Processor.process(self, input_files, output_file, dryrun, stdin, stdout)
 
 
-def scanbro(scanner, pipeline, output_name, clean=0, trim=False, batch=False, dryrun=False):
+def scanbro(scanner, pipeline, output_name, clean=0, exclude=[], interactive=False, dryrun=False):
     """
     Do the hard work of scanning to one or more files and processing
     these with any of the post-processing filters selected.
@@ -639,12 +656,12 @@ def scanbro(scanner, pipeline, output_name, clean=0, trim=False, batch=False, dr
        clean == 2: intermediate and input files are deleted,
        clean == 3: scan is forced and all files are deleted.
 
-    If trim == True: last page of scan is deleted before pipeline.
+    If exclude: selected pages of scan are deleted before pipeline.
        This rule is not enforced if there are less than 4 pages in
        the scan; there is no need and therefore the option is likely
        erroneously specified.
 
-    If batch == True: interactively scan multiple times.
+    If interactive == True: interactively scan multiple times.
 
     If dryrun == True: commands are shown but not executed.
     """
@@ -653,8 +670,8 @@ def scanbro(scanner, pipeline, output_name, clean=0, trim=False, batch=False, dr
     scanned_files = scanner.scan(
         output_name,
         clobber=(True if clean >= 3 else False),
-        trim=trim,
-        batch=batch,
+        exclude=exclude,
+        interactive=interactive,
         dryrun=dryrun,
     )
 
@@ -779,6 +796,29 @@ def name_files_interactively(filepaths, verify=True):
     return named
 
 
+def uniq(entries: list) -> list:
+    seen = set()
+    return [x for x in entries if x not in seen and not seen.add(x)]
+
+
+def parse_exclude(exclude: str) -> list:
+    if exclude is None:
+        return []
+    entries = []
+    for e in exclude.split(','):
+        try:
+            entries.append(int(e))
+        except ValueError:
+            # If it's not a number, it might be a range in the form 'N-M'
+            if e.count('-') == 1:
+                pair = e.split('-')
+                assert len(pair) == 2
+                entries += list(range(pair[0], pair[1]+1))
+            else:
+                raise
+    return entries
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description='Scan from your scanner to searchable PDF.',
@@ -868,23 +908,22 @@ if __name__ == "__main__":
         help='input scan mode, such as black&white or color',
     )
     parser.add_argument(
-        '-x', '--batch',
-        dest='batch',
+        '-i', '--interactive',
+        dest='interactive',
         action='store_true',
         help='scan multiple times interactively',
     )
     parser.add_argument(
-        '-z', '--group-by',
+        '-g', '--group-by',
         dest='group_by',
         type=int,
         default=0,
         help='group input files by N and save separately',
     )
     parser.add_argument(
-        '-t', '--trim-last',
-        dest='trim',
-        action='store_true',
-        help='discard last page of scan, useful for duplex scans',
+        '-e', '--exclude',
+        dest='exclude',
+        help='exclude certain pages',
     )
 
     # Post-processing options:
@@ -924,19 +963,19 @@ if __name__ == "__main__":
         help='language the input should be interpreted in [tesseract]',
     )
     parser.add_argument(
-        '-i', '--im-profile',
+        '--im-profile',
         dest='im_profile',
         choices=ImageMagick.profiles.choices,
         help='output postprocessing profile of image [imagemagick]',
     )
     parser.add_argument(
-        '-q', '--im-quality',
+        '--im-quality',
         dest='convert_quality',
         choices=ImageMagick.qualities.choices,
         help='output quality of image [imagemagick]',
     )
     parser.add_argument(
-        '-g', '--gs-profile',
+        '--gs-profile',
         dest='gs_profile',
         choices=Ghostscript.profiles.choices,
         help='output compression profile of PDF (default=high) [ghostscript]',
@@ -965,8 +1004,8 @@ if __name__ == "__main__":
         # We need to convert from PNM to PNG. The default options for
         # ImageMagick should result in a lossless conversion.
         args.filters.append('imagemagick')
-    if args.group_by != 0 and args.trim:
-        raise Exception('cannot specify --group-by and --trim simultaneously')
+    if args.group_by != 0 and args.exclude is not None:
+        raise Exception('cannot specify --group-by and --exclude simultaneously')
 
     # Create scanner and pipeline. The order is not customizable.
     scanner = make_scanner(args)
@@ -995,8 +1034,8 @@ if __name__ == "__main__":
         pipeline,
         output,
         clean=args.clean,
-        trim=args.trim,
-        batch=args.batch,
+        exclude=parse_exclude(args.exclude),
+        interactive=args.interactive,
         dryrun=args.dryrun,
     )
 

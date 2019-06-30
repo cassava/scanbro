@@ -807,7 +807,12 @@ def parse_exclude(exclude: str) -> list:
     entries = []
     for e in exclude.split(','):
         try:
-            entries.append(int(e))
+            i = int(e)
+            if i == 0:
+                raise ValueError("invalid page index: 0")
+            elif i > 0:
+                i -= 1
+            entries.append(i)
         except ValueError:
             # If it's not a number, it might be a range in the form 'N-M'
             if e.count('-') == 1:
@@ -923,7 +928,7 @@ if __name__ == "__main__":
     parser.add_argument(
         '-e', '--exclude',
         dest='exclude',
-        help='exclude certain pages',
+        help='exclude certain pages, with 1 as the first page and -1 as the last page',
     )
 
     # Post-processing options:

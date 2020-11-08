@@ -164,6 +164,9 @@ PAPERSIZES = {
     # Receipts
     "receipt-80": Papersize(80, 300),
     "receipt-60": Papersize(60, 250),
+
+    # Other
+    "cd":       Papersize(120, 120),
 }
 
 

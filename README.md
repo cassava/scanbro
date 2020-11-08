@@ -18,6 +18,17 @@ Currently the scripts make use of SANE, Tesseract, and Ghostscript, so these are
 also dependencies. ImageMagick can also be useful if you want to extend the
 script with your own filters.
 
+On Archlinux (or Manjaro), you need the following packages:
+
+    tesseract
+    tesseract-data-deu
+    tesseract-data-eng
+    ghostscript
+    imagemagick
+    unpaper
+    texlive-core
+    evince
+
 You may install the binary to a directory of your choosing with a name of
 your choosing.
 
